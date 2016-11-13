@@ -6,12 +6,17 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.support.GeneratedKeyHolder;
+import org.springframework.jdbc.support.KeyHolder;
 import org.springframework.jdbc.support.rowset.SqlRowSet;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.*;
 
+import java.sql.PreparedStatement;
+import java.sql.Statement;
+import java.sql.Timestamp;
 import java.util.*;
 
 
@@ -41,35 +46,40 @@ public class GodController {
     @Transactional
     @RequestMapping(path = "db/api/status", method = RequestMethod.GET)
     public ResponseEntity status() {
-        int user = jdbcTemplate.queryForObject("SELECT count(*) FROM user_profile;", Integer.class);
-        int thread = jdbcTemplate.queryForObject("SELECT count(*) FROM thread WHERE isDeleted = FALSE;", Integer.class);
-        int forum = jdbcTemplate.queryForObject("SELECT count(*) FROM forum;", Integer.class);
-        int post = jdbcTemplate.queryForObject("SELECT count(*) FROM post WHERE isDeleted = FALSE;", Integer.class);
+        final int user = jdbcTemplate.queryForObject("SELECT count(*) FROM user_profile;", Integer.class);
+        final int thread = jdbcTemplate.queryForObject("SELECT count(*) FROM thread WHERE isDeleted = FALSE;", Integer.class);
+        final int forum = jdbcTemplate.queryForObject("SELECT count(*) FROM forum;", Integer.class);
+        final int post = jdbcTemplate.queryForObject("SELECT count(*) FROM post WHERE isDeleted = FALSE;", Integer.class);
         return ResponseEntity.ok(ResponseBody.ok(new StatusResponse(user, thread, forum, post)));
     }
 
-    @Transactional
     @RequestMapping(path = "db/api/user/create", method = RequestMethod.POST)
     public ResponseEntity createUser(@RequestBody UserCreateRequest request) {
         if (StringUtils.isEmpty(request.email)) {
             return ResponseEntity.ok(ResponseBody.invalid());
         }
+        final KeyHolder keyHolder = new GeneratedKeyHolder();
         try {
-            jdbcTemplate.update("INSERT INTO user_profile (username, email, name, about, isAnonymous) " +
-                    "VALUES (?, ?, ?, ?, ?);", request.username, request.email, request.name, request.about,
-                    request.isAnonymous);
+            jdbcTemplate.update(connection -> {
+                final PreparedStatement ps = connection.prepareStatement("INSERT INTO user_profile " +
+                        "(username, email, name, about, isAnonymous) VALUES (?, ?, ?, ?, ?);", Statement.RETURN_GENERATED_KEYS);
+                ps.setString(1, request.username);
+                ps.setString(2, request.email);
+                ps.setString(3, request.name);
+                ps.setString(4, request.about);
+                ps.setBoolean(5, request.isAnonymous);
+                return ps;
+            }, keyHolder);
         } catch (DuplicateKeyException e) {
             return ResponseEntity.ok(ResponseBody.userAlreadyExists());
         }
-        SqlRowSet set = jdbcTemplate.queryForRowSet("SELECT * FROM user_profile WHERE email = ?;", request.email);
-        set.next();
-        UserCreateResponse response = new UserCreateResponse();
-        response.id = set.getInt("id");
-        response.username = set.getString("username");
-        response.email = set.getString("email");
-        response.name = set.getString("name");
-        response.about = set.getString("about");
-        response.isAnonymous = set.getBoolean("isAnonymous");
+        final UserCreateResponse response = new UserCreateResponse();
+        response.id = keyHolder.getKey().intValue();
+        response.username = request.username;
+        response.email = request.email;
+        response.name = request.name;
+        response.about = request.about;
+        response.isAnonymous = request.isAnonymous;
         return ResponseEntity.ok(ResponseBody.ok(response));
     }
 
@@ -87,12 +97,12 @@ public class GodController {
         } catch (DataIntegrityViolationException e) {
             return ResponseEntity.ok(ResponseBody.incorrect());
         }
-        SqlRowSet set = jdbcTemplate.queryForRowSet("SELECT * FROM forum WHERE name = ? AND short_name = ? " +
+        final SqlRowSet set = jdbcTemplate.queryForRowSet("SELECT * FROM forum WHERE name = ? AND short_name = ? " +
                 "AND user_email = ?;", request.name, request.short_name, request.user);
         if (!set.next()) {
             return ResponseEntity.ok(ResponseBody.incorrect());
         }
-        ForumDetails details = new ForumDetails();
+        final ForumDetails details = new ForumDetails();
         details.id = set.getInt("id");
         details.name = set.getString("name");
         details.short_name = set.getString("short_name");
@@ -100,7 +110,7 @@ public class GodController {
         return ResponseEntity.ok(ResponseBody.ok(details));
     }
 
-    @Transactional
+    @SuppressWarnings("OverlyComplexBooleanExpression")
     @RequestMapping(path = "db/api/thread/create", method = RequestMethod.POST)
     public ResponseEntity createThread(@RequestBody ThreadCreateRequest request) {
         if (request.isClosed == null || StringUtils.isEmpty(request.forum) || StringUtils.isEmpty(request.title) ||
@@ -108,30 +118,39 @@ public class GodController {
                 StringUtils.isEmpty(request.message) || StringUtils.isEmpty(request.slug) ) {
             return ResponseEntity.ok(ResponseBody.invalid());
         }
+        final KeyHolder keyHolder = new GeneratedKeyHolder();
         try {
-            jdbcTemplate.update("INSERT INTO " +
-                    "thread (forum, title, slug, message, user_email, creation_time, isClosed, isDeleted) VALUES " +
-                    "(?, ?, ?, ?, ?, ?, ?, ?);", request.forum, request.title, request.slug, request.message,
-                    request.user, request.date, request.isClosed, request.isDeleted);
+            jdbcTemplate.update(connection -> {
+                final PreparedStatement ps = connection.prepareStatement("INSERT INTO " +
+                        "thread (forum, title, slug, message, user_email, creation_time, isClosed, isDeleted) VALUES " +
+                        "(?, ?, ?, ?, ?, ?, ?, ?);", Statement.RETURN_GENERATED_KEYS);
+                ps.setString(1, request.forum);
+                ps.setString(2, request.title);
+                ps.setString(3, request.slug);
+                ps.setString(4, request.message);
+                ps.setString(5, request.user);
+                ps.setTimestamp(6, Timestamp.valueOf(request.date));
+                ps.setBoolean(7, request.isClosed);
+                ps.setBoolean(8, request.isDeleted);
+                return ps;
+            }, keyHolder);
         } catch (DataIntegrityViolationException e) {
             return ResponseEntity.ok(ResponseBody.incorrect());
         }
-        SqlRowSet set = jdbcTemplate.queryForRowSet("SELECT * FROM thread WHERE id = last_insert_id()");
-        set.next();
-        ThreadCreateResponse response = new ThreadCreateResponse();
-        response.date = Utils.DATE_FORMAT.format(set.getTimestamp("creation_time"));
-        response.forum = set.getString("forum");
-        response.id = set.getInt("id");
-        response.isClosed = set.getBoolean("isClosed");
-        response.isDeleted = set.getBoolean("isDeleted");
-        response.message = set.getString("message");
-        response.slug = set.getString("slug");
-        response.title = set.getString("title");
-        response.user = set.getString("user_email");
+        final ThreadCreateResponse response = new ThreadCreateResponse();
+        response.date = request.date;
+        response.forum = request.forum;
+        response.id = keyHolder.getKey().intValue();
+        response.isClosed = request.isClosed;
+        response.isDeleted = request.isDeleted;
+        response.message = request.message;
+        response.slug = request.slug;
+        response.title = request.title;
+        response.user = request.user;
         return ResponseEntity.ok(ResponseBody.ok(response));
     }
 
-    @Transactional
+    @SuppressWarnings({"OverlyComplexBooleanExpression", "MagicNumber"})
     @RequestMapping(path = "db/api/post/create", method = RequestMethod.POST)
     public ResponseEntity createPost(@RequestBody PostCreateRequest request) {
         if (StringUtils.isEmpty(request.date) || StringUtils.isEmpty(request.forum) ||
@@ -139,33 +158,42 @@ public class GodController {
                 request.thread == null) {
             return ResponseEntity.ok(ResponseBody.invalid());
         }
+        final KeyHolder keyHolder = new GeneratedKeyHolder();
         try {
-            jdbcTemplate.update("INSERT INTO post (user_email, message, forum, thread_id, parent, " +
-                    "creation_time, isApproved, isHighlighted, isEdited, isSpam, isDeleted) VALUES " +
-                    "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);", request.user, request.message, request.forum, request.thread,
-                    request.parent, request.date, request.isApproved, request.isHighlighted, request.isEdited,
-                    request.isSpam, request.isDeleted);
+            jdbcTemplate.update(connection -> {
+                final PreparedStatement ps = connection.prepareStatement("INSERT INTO post " +
+                        "(user_email, message, forum, thread_id, parent, creation_time, isApproved, isHighlighted, " +
+                        "isEdited, isSpam, isDeleted) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);",
+                        Statement.RETURN_GENERATED_KEYS);
+                ps.setString(1, request.user);
+                ps.setString(2, request.message);
+                ps.setString(3, request.forum);
+                ps.setInt(4, request.thread);
+                ps.setObject(5, request.parent);
+                ps.setTimestamp(6, Timestamp.valueOf(request.date));
+                ps.setBoolean(7, request.isApproved);
+                ps.setBoolean(8, request.isHighlighted);
+                ps.setBoolean(9, request.isEdited);
+                ps.setBoolean(10, request.isSpam);
+                ps.setBoolean(11, request.isDeleted);
+                return ps;
+            }, keyHolder);
         } catch (DataIntegrityViolationException e) {
             return ResponseEntity.ok(ResponseBody.incorrect());
         }
-        SqlRowSet set = jdbcTemplate.queryForRowSet("SELECT * FROM post WHERE id = last_insert_id()");
-        set.next();
-        PostCreateResponse response = new PostCreateResponse();
-        response.id = set.getInt("id");
-        response.user = set.getString("user_email");
-        response.message = set.getString("message");
-        response.forum = set.getString("forum");
-        response.thread = set.getInt("thread_id");
-        response.parent = (Integer) set.getObject("parent");
-        if (set.wasNull()) {
-            response.parent = null;
-        }
-        response.date = Utils.DATE_FORMAT.format(set.getTimestamp("creation_time"));
-        response.isApproved = set.getBoolean("isApproved");
-        response.isHighlighted = set.getBoolean("isHighlighted");
-        response.isEdited = set.getBoolean("isEdited");
-        response.isSpam = set.getBoolean("isSpam");
-        response.isDeleted = set.getBoolean("isDeleted");
+        final PostCreateResponse response = new PostCreateResponse();
+        response.id = keyHolder.getKey().intValue();
+        response.user = request.user;
+        response.message = request.message;
+        response.forum = request.forum;
+        response.thread = request.thread;
+        response.parent = request.parent;
+        response.date = request.date;
+        response.isApproved = request.isApproved;
+        response.isHighlighted = request.isHighlighted;
+        response.isEdited = request.isEdited;
+        response.isSpam = request.isSpam;
+        response.isDeleted = request.isDeleted;
         return ResponseEntity.ok(ResponseBody.ok(response));
     }
 
@@ -218,7 +246,7 @@ public class GodController {
         }
         jdbcTemplate.update("DELETE FROM following WHERE follower = ? AND followee = ?;", following.follower,
                 following.followee);
-        UserDetails details = UserDetails.get(following.follower);
+        final UserDetails details = UserDetails.get(following.follower);
         if (details == null) {
             return ResponseEntity.ok(ResponseBody.notFound());
         }
@@ -234,7 +262,7 @@ public class GodController {
         }
         jdbcTemplate.update("UPDATE user_profile SET about = ?, name = ? WHERE email = ?;", request.about, request.name,
                 request.user);
-        UserDetails details = UserDetails.get(request.user);
+        final UserDetails details = UserDetails.get(request.user);
         if (details == null) {
             return ResponseEntity.ok(ResponseBody.notFound());
         }
@@ -247,7 +275,7 @@ public class GodController {
         if (StringUtils.isEmpty(email)) {
             return ResponseEntity.ok(ResponseBody.notFound());
         }
-        UserDetails details = UserDetails.get(email);
+        final UserDetails details = UserDetails.get(email);
         if (details == null) {
             return ResponseEntity.ok(ResponseBody.incorrect());
         }
@@ -264,7 +292,7 @@ public class GodController {
         if (!Utils.isArrayValid(related, "user")) {
             return ResponseEntity.ok(ResponseBody.incorrect());
         }
-        ForumDetails details = ForumDetails.get(forum, related);
+        final ForumDetails details = ForumDetails.get(forum, related);
         if (details == null) {
             return ResponseEntity.ok(ResponseBody.notFound());
         }
@@ -278,7 +306,7 @@ public class GodController {
         if (!Utils.isArrayValid(related, "user", "forum")) {
             return ResponseEntity.ok(ResponseBody.incorrect());
         }
-        ThreadDetails details = ThreadDetails.get(thread, related);
+        final ThreadDetails details = ThreadDetails.get(thread, related);
         if (details == null) {
             return ResponseEntity.ok(ResponseBody.notFound());
         }
@@ -292,7 +320,7 @@ public class GodController {
         if (!Utils.isArrayValid(related, "user", "thread", "forum")) {
             return ResponseEntity.ok(ResponseBody.incorrect());
         }
-        PostDetails details = PostDetails.get(post, related);
+        final PostDetails details = PostDetails.get(post, related);
         if (details == null) {
             return ResponseEntity.ok(ResponseBody.notFound());
         }
@@ -317,11 +345,11 @@ public class GodController {
         if (!"desc".equalsIgnoreCase(order) && !"asc".equalsIgnoreCase(order)) {
             return ResponseEntity.ok(ResponseBody.incorrect());
         }
-        String limitQuery = limit == null ? "" : " LIMIT " + limit;
-        SqlRowSet set = jdbcTemplate.queryForRowSet("SELECT follower FROM following JOIN user_profile ON " +
+        final String limitQuery = limit == null ? "" : " LIMIT " + limit;
+        final SqlRowSet set = jdbcTemplate.queryForRowSet("SELECT follower FROM following JOIN user_profile ON " +
                 "following.follower = user_profile.email WHERE followee = ? AND id >= ? ORDER BY name " + order +
-                limitQuery + ";", user, since);
-        List<UserDetails> followers = new ArrayList<>();
+                limitQuery + ';', user, since);
+        final List<UserDetails> followers = new ArrayList<>();
         while (set.next()) {
             followers.add(UserDetails.get(set.getString("follower")));
         }
@@ -346,11 +374,11 @@ public class GodController {
         if (!"desc".equalsIgnoreCase(order) && !"asc".equalsIgnoreCase(order)) {
             return ResponseEntity.ok(ResponseBody.incorrect());
         }
-        String limitQuery = limit == null ? "" : " LIMIT " + limit;
-        SqlRowSet set = jdbcTemplate.queryForRowSet("SELECT followee FROM following JOIN user_profile ON " +
+        final String limitQuery = limit == null ? "" : " LIMIT " + limit;
+        final SqlRowSet set = jdbcTemplate.queryForRowSet("SELECT followee FROM following JOIN user_profile ON " +
                 "following.followee = user_profile.email WHERE follower = ? AND id >= ? ORDER BY name " + order +
-                limitQuery + ";", user, since);
-        List<UserDetails> followees = new ArrayList<>();
+                limitQuery + ';', user, since);
+        final List<UserDetails> followees = new ArrayList<>();
         while (set.next()) {
             followees.add(UserDetails.get(set.getString("followee")));
         }
@@ -359,7 +387,7 @@ public class GodController {
 
     @Transactional
     @RequestMapping(path = "db/api/user/listPosts", method = RequestMethod.GET)
-    public ResponseEntity listFollowing(@RequestParam(name = "user") String user,
+    public ResponseEntity listUserPosts(@RequestParam(name = "user") String user,
                                         @RequestParam(name = "limit", required = false) Integer limit,
                                         @RequestParam(name = "order", required = false) String order,
                                         @RequestParam(name = "since", required = false) String since) {
@@ -376,11 +404,10 @@ public class GodController {
         if (since == null) {
             return ResponseEntity.ok(ResponseBody.incorrect());
         }
-        String limitQuery = limit == null ? "" : " LIMIT " + limit;
-        SqlRowSet set = jdbcTemplate.queryForRowSet("SELECT id FROM post WHERE user_email = ? AND " +
-                "TIMESTAMPDIFF(SECOND, ?, creation_time) >= 0 ORDER BY creation_time " + order + limitQuery + ";",
-                user, since);
-        List<PostDetails> posts = new ArrayList<>();
+        final String limitQuery = limit == null ? "" : " LIMIT " + limit;
+        final SqlRowSet set = jdbcTemplate.queryForRowSet("SELECT id FROM post WHERE user_email = ? AND " +
+                "creation_time >= ? ORDER BY creation_time " + order + limitQuery + ';', user, since);
+        final List<PostDetails> posts = new ArrayList<>();
         while (set.next()) {
             posts.add(PostDetails.get(set.getInt("id"), null));
         }
@@ -405,18 +432,19 @@ public class GodController {
         if (since == null) {
             since = 0;
         }
-        String limitQuery = limit == null ? "" : " LIMIT " + limit;
-        SqlRowSet set = jdbcTemplate.queryForRowSet("SELECT DISTINCT email FROM user_profile JOIN post ON " +
+        final String limitQuery = limit == null ? "" : " LIMIT " + limit;
+        final SqlRowSet set = jdbcTemplate.queryForRowSet("SELECT DISTINCT email FROM user_profile JOIN post ON " +
                 "user_profile.email = post.user_email JOIN forum ON post.forum = forum.short_name WHERE " +
-                "short_name = ? AND user_profile.id >= ? ORDER BY user_profile.name " + order + limitQuery + ";",
+                "short_name = ? AND user_profile.id >= ? ORDER BY user_profile.name " + order + limitQuery + ';',
                 forum, since);
-        List<UserDetails> list = new ArrayList<>();
+        final List<UserDetails> list = new ArrayList<>();
         while (set.next()) {
             list.add(UserDetails.get(set.getString("email")));
         }
         return ResponseEntity.ok(ResponseBody.ok(list.toArray()));
     }
 
+    @SuppressWarnings("OverlyComplexMethod")
     @Transactional
     @RequestMapping(path = "db/api/forum/listThreads", method = RequestMethod.GET)
     public ResponseEntity listForumThreads(@RequestParam(name = "forum") String forum,
@@ -440,18 +468,18 @@ public class GodController {
         if (since == null) {
             return ResponseEntity.ok(ResponseBody.incorrect());
         }
-        String limitQuery = limit == null ? "" : " LIMIT " + limit;
-        SqlRowSet set = jdbcTemplate.queryForRowSet("SELECT thread.id FROM thread JOIN forum " +
+        final String limitQuery = limit == null ? "" : " LIMIT " + limit;
+        final SqlRowSet set = jdbcTemplate.queryForRowSet("SELECT thread.id FROM thread JOIN forum " +
                 "ON thread.forum = forum.short_name WHERE short_name = ? AND " +
-                "TIMESTAMPDIFF(SECOND, ?, creation_time) >= 0 ORDER BY creation_time " + order + limitQuery + ";",
-                forum, since);
-        List<ThreadDetails> list = new ArrayList<>();
+                "creation_time >= ? ORDER BY creation_time " + order + limitQuery + ';', forum, since);
+        final List<ThreadDetails> list = new ArrayList<>();
         while (set.next()) {
             list.add(ThreadDetails.get(set.getInt("id"), related));
         }
         return ResponseEntity.ok(ResponseBody.ok(list.toArray()));
     }
 
+    @SuppressWarnings("OverlyComplexMethod")
     @Transactional
     @RequestMapping(path = "db/api/forum/listPosts", method = RequestMethod.GET)
     public ResponseEntity listForumPosts(@RequestParam(name = "forum") String forum,
@@ -475,18 +503,19 @@ public class GodController {
         if (since == null) {
             return ResponseEntity.ok(ResponseBody.incorrect());
         }
-        String limitQuery = limit == null ? "" : " LIMIT " + limit;
-        SqlRowSet set = jdbcTemplate.queryForRowSet("SELECT post.id FROM post JOIN forum " +
+        final String limitQuery = limit == null ? "" : " LIMIT " + limit;
+        final SqlRowSet set = jdbcTemplate.queryForRowSet("SELECT post.id FROM post JOIN forum " +
                 "ON post.forum = forum.short_name WHERE short_name = ? AND " +
-                "TIMESTAMPDIFF(SECOND, ?, creation_time) >= 0 ORDER BY creation_time " + order + limitQuery + ";",
+                "creation_time >= ? ORDER BY creation_time " + order + limitQuery + ';',
                 forum, since);
-        List<PostDetails> list = new ArrayList<>();
+        final List<PostDetails> list = new ArrayList<>();
         while (set.next()) {
             list.add(PostDetails.get(set.getInt("id"), related));
         }
         return ResponseEntity.ok(ResponseBody.ok(list.toArray()));
     }
 
+    @SuppressWarnings("OverlyComplexMethod")
     @Transactional
     @RequestMapping(path = "db/api/post/list", method = RequestMethod.GET)
     public ResponseEntity listPosts(@RequestParam(name = "forum", required = false) String forum,
@@ -510,26 +539,27 @@ public class GodController {
         if (since == null) {
             return ResponseEntity.ok(ResponseBody.incorrect());
         }
-        String limitQuery = limit == null ? "" : " LIMIT " + limit;
-        SqlRowSet set;
+        final String limitQuery = limit == null ? "" : " LIMIT " + limit;
+        final SqlRowSet set;
         if (StringUtils.isEmpty(forum)) {
             set = jdbcTemplate.queryForRowSet("SELECT post.id FROM post JOIN thread " +
                     "ON post.thread_id = thread.id WHERE thread_id = ? AND " +
-                    "TIMESTAMPDIFF(SECOND, ?, post.creation_time) >= 0 ORDER BY post.creation_time " + order +
-                    limitQuery + ";", thread, since);
+                    "post.creation_time >= ? ORDER BY post.creation_time " + order +
+                    limitQuery + ';', thread, since);
         } else {
             set = jdbcTemplate.queryForRowSet("SELECT post.id FROM post JOIN forum " +
                     "ON post.forum = forum.short_name WHERE short_name = ? AND " +
-                    "TIMESTAMPDIFF(SECOND, ?, creation_time) >= 0 ORDER BY creation_time " + order + limitQuery + ";",
+                    "creation_time >= ? ORDER BY creation_time " + order + limitQuery + ';',
                     forum, since);
         }
-        List<PostDetails> list = new ArrayList<>();
+        final List<PostDetails> list = new ArrayList<>();
         while (set.next()) {
             list.add(PostDetails.get(set.getInt("id"), null));
         }
         return ResponseEntity.ok(ResponseBody.ok(list.toArray()));
     }
 
+    @SuppressWarnings("OverlyComplexMethod")
     @Transactional
     @RequestMapping(path = "db/api/thread/list", method = RequestMethod.GET)
     public ResponseEntity listThreads(@RequestParam(name = "forum", required = false) String forum,
@@ -553,20 +583,20 @@ public class GodController {
         if (since == null) {
             return ResponseEntity.ok(ResponseBody.incorrect());
         }
-        String limitQuery = limit == null ? "" : " LIMIT " + limit;
-        SqlRowSet set;
+        final String limitQuery = limit == null ? "" : " LIMIT " + limit;
+        final SqlRowSet set;
         if (StringUtils.isEmpty(forum)) {
             set = jdbcTemplate.queryForRowSet("SELECT thread.id FROM thread JOIN user_profile " +
                     "ON thread.user_email = user_profile.email WHERE email = ? AND " +
-                    "TIMESTAMPDIFF(SECOND, ?, thread.creation_time) >= 0 ORDER BY thread.creation_time " + order +
-                    limitQuery + ";", user, since);
+                    "creation_time >= ? ORDER BY thread.creation_time " + order +
+                    limitQuery + ';', user, since);
         } else {
             set = jdbcTemplate.queryForRowSet("SELECT thread.id FROM thread JOIN forum " +
                     "ON thread.forum = forum.short_name WHERE short_name = ? AND " +
-                    "TIMESTAMPDIFF(SECOND, ?, creation_time) >= 0 ORDER BY creation_time " + order + limitQuery + ";",
+                    "creation_time >= ? ORDER BY creation_time " + order + limitQuery + ';',
                     forum, since);
         }
-        List<ThreadDetails> list = new ArrayList<>();
+        final List<ThreadDetails> list = new ArrayList<>();
         while (set.next()) {
             list.add(ThreadDetails.get(set.getInt("id"), null));
         }
@@ -580,7 +610,7 @@ public class GodController {
             return ResponseEntity.ok(ResponseBody.incorrect());
         }
         jdbcTemplate.update("UPDATE post SET message = ? WHERE id = ?;", request.message, request.post);
-        PostDetails details = PostDetails.get(request.post, null);
+        final PostDetails details = PostDetails.get(request.post, null);
         if (details == null) {
             return ResponseEntity.ok(ResponseBody.notFound());
         }
@@ -603,12 +633,12 @@ public class GodController {
     @Transactional
     @RequestMapping(path = "db/api/post/vote", method = RequestMethod.POST)
     public ResponseEntity ratePost(@RequestBody PostVote request) {
-        String field = Utils.getFieldVote(request.vote);
+        final String field = Utils.getFieldVote(request.vote);
         if (field == null) {
             return ResponseEntity.ok(ResponseBody.incorrect());
         }
         jdbcTemplate.update(String.format("UPDATE post SET %s = %s + 1 WHERE id = ?;", field, field), request.post);
-        PostDetails details = PostDetails.get(request.post, null);
+        final PostDetails details = PostDetails.get(request.post, null);
         if (details == null) {
             return ResponseEntity.ok(ResponseBody.notFound());
         }
@@ -618,12 +648,12 @@ public class GodController {
     @Transactional
     @RequestMapping(path = "db/api/thread/vote", method = RequestMethod.POST)
     public ResponseEntity rateThread(@RequestBody ThreadVote request) {
-        String vote = Utils.getFieldVote(request.vote);
+        final String vote = Utils.getFieldVote(request.vote);
         if (vote == null) {
             return ResponseEntity.ok(ResponseBody.incorrect());
         }
         jdbcTemplate.update(String.format("UPDATE thread SET %s = %s + 1 WHERE id = ?;", vote, vote), request.thread);
-        ThreadDetails details = ThreadDetails.get(request.thread, null);
+        final ThreadDetails details = ThreadDetails.get(request.thread, null);
         if (details == null) {
             return ResponseEntity.ok(ResponseBody.notFound());
         }
@@ -666,20 +696,21 @@ public class GodController {
         }
         jdbcTemplate.update("UPDATE thread SET message = ?, slug = ? WHERE id = ?;", request.message, request.slug,
                 request.thread);
-        ThreadDetails details = ThreadDetails.get(request.thread, null);
+        final ThreadDetails details = ThreadDetails.get(request.thread, null);
         if (details == null) {
             return ResponseEntity.ok(ResponseBody.notFound());
         }
         return ResponseEntity.ok(ResponseBody.ok(details));
     }
 
+    @SuppressWarnings("OverlyComplexMethod")
     @Transactional
     @RequestMapping(path = "db/api/thread/listPosts", method = RequestMethod.GET)
-    public ResponseEntity listPostsInThread(@RequestParam(name = "thread") int thread,
-                                            @RequestParam(name = "limit", required = false) Integer limit,
-                                            @RequestParam(name = "sort", required = false) String sort,
-                                            @RequestParam(name = "order", required = false) String order,
-                                            @RequestParam(name = "since", required = false) String since) {
+    public ResponseEntity listThreadPosts(@RequestParam(name = "thread") int thread,
+                                          @RequestParam(name = "limit", required = false) Integer limit,
+                                          @RequestParam(name = "sort", required = false) String sort,
+                                          @RequestParam(name = "order", required = false) String order,
+                                          @RequestParam(name = "since", required = false) String since) {
         if (limit != null && limit < 0) {
             return ResponseEntity.ok(ResponseBody.incorrect());
         }
@@ -699,11 +730,10 @@ public class GodController {
         if (since == null) {
             return ResponseEntity.ok(ResponseBody.incorrect());
         }
-        SqlRowSet set = jdbcTemplate.queryForRowSet("SELECT post.id FROM post JOIN thread " +
+        final SqlRowSet set = jdbcTemplate.queryForRowSet("SELECT post.id FROM post JOIN thread " +
                     "ON post.thread_id = thread.id WHERE thread_id = ? AND " +
-                "TIMESTAMPDIFF(SECOND, ?, post.creation_time) >= 0 ORDER BY post.creation_time " + order + ";",
-                thread, since);
-        List<PostDetails> list = new ArrayList<>();
+                "post.creation_time >= ? ORDER BY post.creation_time " + order + ';', thread, since);
+        final List<PostDetails> list = new ArrayList<>();
         while (set.next()) {
             list.add(PostDetails.get(set.getInt("id"), null));
         }
@@ -711,6 +741,7 @@ public class GodController {
                 "desc".equalsIgnoreCase(order)).toArray()));
     }
 
+    @SuppressWarnings("InstanceMethodNamingConvention")
     @ExceptionHandler({HttpMessageNotReadableException.class, MissingServletRequestParameterException.class})
     public ResponseEntity handleHttpMessageNotReadableException() {
         return ResponseEntity.ok(ResponseBody.invalid());
@@ -726,9 +757,11 @@ public class GodController {
         private int code;
         private Object response;
 
+        @SuppressWarnings("PublicConstructorInNonPublicClass")
         public ResponseBody() {
         }
 
+        @SuppressWarnings("PublicConstructorInNonPublicClass")
         public ResponseBody(int code, Object response) {
             this.code = code;
             this.response = response;
@@ -750,10 +783,12 @@ public class GodController {
             this.response = response;
         }
 
+        @SuppressWarnings("StaticMethodNamingConvention")
         public static ResponseBody ok() {
             return new ResponseBody(0, "OK");
         }
 
+        @SuppressWarnings("StaticMethodNamingConvention")
         public static ResponseBody ok(Object response) {
             return new ResponseBody(0, response);
         }
@@ -786,9 +821,11 @@ public class GodController {
         private int forum;
         private int post;
 
+        @SuppressWarnings("PublicConstructorInNonPublicClass")
         public StatusResponse() {
         }
 
+        @SuppressWarnings("PublicConstructorInNonPublicClass")
         public StatusResponse(int user, int thread, int forum, int post) {
             this.user = user;
             this.thread = thread;
@@ -837,6 +874,7 @@ public class GodController {
         private String about;
         private boolean isAnonymous;
 
+        @SuppressWarnings("PublicConstructorInNonPublicClass")
         public UserCreateRequest() {
         }
 
@@ -890,6 +928,7 @@ public class GodController {
         private String name;
         private String username;
 
+        @SuppressWarnings("PublicConstructorInNonPublicClass")
         public UserCreateResponse() {
         }
 
@@ -945,9 +984,11 @@ public class GodController {
     @SuppressWarnings("unused")
     private static final class ForumCreateRequest {
         private String name;
+        @SuppressWarnings("InstanceVariableNamingConvention")
         private String short_name;
         private String user;
 
+        @SuppressWarnings("PublicConstructorInNonPublicClass")
         public ForumCreateRequest() {
         }
 
@@ -959,12 +1000,14 @@ public class GodController {
             this.name = name;
         }
 
+        @SuppressWarnings("InstanceMethodNamingConvention")
         public String getShort_name() {
             return short_name;
         }
 
-        public void setShort_name(String short_name) {
-            this.short_name = short_name;
+        @SuppressWarnings("InstanceMethodNamingConvention")
+        public void setShort_name(String shortName) {
+            short_name = shortName;
         }
 
         public String getUser() {
@@ -987,6 +1030,7 @@ public class GodController {
         private String title;
         private String user;
 
+        @SuppressWarnings("PublicConstructorInNonPublicClass")
         public ThreadCreateRequest() {
         }
 
@@ -1067,6 +1111,7 @@ public class GodController {
         private String title;
         private String user;
 
+        @SuppressWarnings("PublicConstructorInNonPublicClass")
         public ThreadCreateResponse() {
         }
 
@@ -1157,6 +1202,7 @@ public class GodController {
         private Integer thread;
         private String user;
 
+        @SuppressWarnings("PublicConstructorInNonPublicClass")
         public PostCreateRequest() {
         }
 
@@ -1264,6 +1310,7 @@ public class GodController {
         private Integer thread;
         private String user;
 
+        @SuppressWarnings("PublicConstructorInNonPublicClass")
         public PostCreateResponse() {
         }
 
@@ -1369,6 +1416,7 @@ public class GodController {
         private Integer thread;
         private String user;
 
+        @SuppressWarnings("PublicConstructorInNonPublicClass")
         public Subscription() {
         }
 
@@ -1394,6 +1442,7 @@ public class GodController {
         private String follower;
         private String followee;
 
+        @SuppressWarnings("PublicConstructorInNonPublicClass")
         public Following() {
         }
 
@@ -1426,6 +1475,7 @@ public class GodController {
         private int[] subscriptions;
         private String username;
 
+        @SuppressWarnings("PublicConstructorInNonPublicClass")
         public UserDetails() {
         }
 
@@ -1501,35 +1551,36 @@ public class GodController {
             this.username = username;
         }
 
+        @SuppressWarnings("StaticMethodNamingConvention")
         public static UserDetails get(String email) {
-            SqlRowSet user = jdbcTemplate.queryForRowSet("SELECT * FROM user_profile WHERE email = ?;", email);
+            final SqlRowSet user = jdbcTemplate.queryForRowSet("SELECT * FROM user_profile WHERE email = ?;", email);
             if (!user.next()) {
                 return null;
             }
-            UserDetails details = new UserDetails();
+            final UserDetails details = new UserDetails();
             details.about = user.getString("about");
             details.email = user.getString("email");
             details.id = user.getInt("id");
             details.isAnonymous = user.getBoolean("isAnonymous");
             details.username = user.getString("username");
             details.name = user.getString("name");
-            SqlRowSet followerSet = jdbcTemplate.queryForRowSet("SELECT follower FROM following WHERE followee = ?;",
-                    email);
-            List<String> followerList = new ArrayList<>();
+            final SqlRowSet followerSet = jdbcTemplate.queryForRowSet("SELECT follower FROM following WHERE " +
+                    "followee = ?;", email);
+            final List<String> followerList = new ArrayList<>();
             while (followerSet.next()) {
                 followerList.add(followerSet.getString("follower"));
             }
             details.followers = followerList.toArray(new String[followerList.size()]);
-            SqlRowSet followeeSet = jdbcTemplate.queryForRowSet("SELECT followee FROM following WHERE follower = ?;",
-                    email);
-            List<String> followeeList = new ArrayList<>();
+            final SqlRowSet followeeSet = jdbcTemplate.queryForRowSet("SELECT followee FROM following WHERE " +
+                    "follower = ?;", email);
+            final List<String> followeeList = new ArrayList<>();
             while (followeeSet.next()) {
                 followeeList.add(followeeSet.getString("followee"));
             }
             details.following = followeeList.toArray(new String[followeeList.size()]);
-            SqlRowSet subscriptionSet = jdbcTemplate.queryForRowSet("SELECT thread_id FROM subscription WHERE " +
+            final SqlRowSet subscriptionSet = jdbcTemplate.queryForRowSet("SELECT thread_id FROM subscription WHERE " +
                     "user_email = ?;", email);
-            List<Integer> subscriptionList = new ArrayList<>();
+            final List<Integer> subscriptionList = new ArrayList<>();
             while (subscriptionSet.next()) {
                 subscriptionList.add(subscriptionSet.getInt("thread_id"));
             }
@@ -1542,9 +1593,11 @@ public class GodController {
     private static final class ForumDetails {
         private int id;
         private String name;
+        @SuppressWarnings("InstanceVariableNamingConvention")
         private String short_name;
         private Object user;
 
+        @SuppressWarnings("PublicConstructorInNonPublicClass")
         public ForumDetails() {
         }
 
@@ -1564,12 +1617,14 @@ public class GodController {
             this.name = name;
         }
 
+        @SuppressWarnings("InstanceMethodNamingConvention")
         public String getShort_name() {
             return short_name;
         }
 
-        public void setShort_name(String short_name) {
-            this.short_name = short_name;
+        @SuppressWarnings("InstanceMethodNamingConvention")
+        public void setShort_name(String shortName) {
+            short_name = shortName;
         }
 
         public Object getUser() {
@@ -1580,12 +1635,13 @@ public class GodController {
             this.user = user;
         }
 
+        @SuppressWarnings("StaticMethodNamingConvention")
         public static ForumDetails get(String shortName, String[] related) {
-            SqlRowSet forum = jdbcTemplate.queryForRowSet("SELECT * FROM forum WHERE short_name = ?;", shortName);
+            final SqlRowSet forum = jdbcTemplate.queryForRowSet("SELECT * FROM forum WHERE short_name = ?;", shortName);
             if (!forum.next()) {
                 return null;
             }
-            ForumDetails details = new ForumDetails();
+            final ForumDetails details = new ForumDetails();
             details.id = forum.getInt("id");
             details.name = forum.getString("name");
             details.short_name = shortName;
@@ -1614,6 +1670,7 @@ public class GodController {
         private String title;
         private Object user;
 
+        @SuppressWarnings("PublicConstructorInNonPublicClass")
         public ThreadDetails() {
         }
 
@@ -1721,12 +1778,13 @@ public class GodController {
             this.user = user;
         }
 
+        @SuppressWarnings("StaticMethodNamingConvention")
         public static ThreadDetails get(int id, String[] related) {
-            SqlRowSet thread = jdbcTemplate.queryForRowSet("SELECT * FROM thread WHERE id = ?;", id);
+            final SqlRowSet thread = jdbcTemplate.queryForRowSet("SELECT * FROM thread WHERE id = ?;", id);
             if (!thread.next()) {
                 return null;
             }
-            ThreadDetails details = new ThreadDetails();
+            final ThreadDetails details = new ThreadDetails();
             details.date = Utils.DATE_FORMAT.format(thread.getTimestamp("creation_time"));
             details.dislikes = thread.getInt("dislikes");
             details.id = thread.getInt("id");
@@ -1740,7 +1798,7 @@ public class GodController {
             details.slug = thread.getString("slug");
             details.title = thread.getString("title");
             if (related != null) {
-                List relatedList = Arrays.asList(related);
+                final List relatedList = Arrays.asList(related);
                 if (relatedList.contains("forum")) {
                     details.forum = ForumDetails.get(thread.getString("forum"), null);
                 } else {
@@ -1777,6 +1835,7 @@ public class GodController {
         private Object thread;
         private Object user;
 
+        @SuppressWarnings("PublicConstructorInNonPublicClass")
         public PostDetails() {
         }
 
@@ -1900,12 +1959,13 @@ public class GodController {
             this.user = user;
         }
 
+        @SuppressWarnings("StaticMethodNamingConvention")
         public static PostDetails get(int id, String[] related) {
-            SqlRowSet post = jdbcTemplate.queryForRowSet("SELECT * FROM post WHERE id = ?;", id);
+            final SqlRowSet post = jdbcTemplate.queryForRowSet("SELECT * FROM post WHERE id = ?;", id);
             if (!post.next()) {
                 return null;
             }
-            PostDetails details = new PostDetails();
+            final PostDetails details = new PostDetails();
             details.date = Utils.DATE_FORMAT.format(post.getTimestamp("creation_time"));
             details.dislikes = post.getInt("dislikes");
             details.id = post.getInt("id");
@@ -1919,7 +1979,7 @@ public class GodController {
             details.parent = (Integer) post.getObject("parent");
             details.points = details.likes - details.dislikes;
             if (related != null) {
-                List relatedList = Arrays.asList(related);
+                final List relatedList = Arrays.asList(related);
                 if (relatedList.contains("forum")) {
                     details.forum = ForumDetails.get(post.getString("forum"), null);
                 } else {
@@ -1943,6 +2003,7 @@ public class GodController {
             return details;
         }
 
+        @SuppressWarnings("OverlyComplexMethod")
         public static List<PostDetails> sortPosts(List<PostDetails> posts, String sort, Integer limit, boolean desc) {
             if ("flat".equalsIgnoreCase(sort)) {
                 if (limit == null || limit >= posts.size()) {
@@ -1950,7 +2011,7 @@ public class GodController {
                 }
                 return posts.subList(0, limit);
             }
-            List<PostDetails> list = PostTreeNode.list(PostTreeNode.tree(null, posts), desc);
+            final List<PostDetails> list = PostTreeNode.list(PostTreeNode.tree(null, posts), desc);
             if (limit == null || limit >= list.size()) {
                 return list;
             }
@@ -1972,7 +2033,8 @@ public class GodController {
             return list;
         }
 
-        private static class PostTreeNode {
+        @SuppressWarnings("InnerClassTooDeeplyNested")
+        private static final class PostTreeNode {
             private PostDetails value;
             private List<PostTreeNode> children = new ArrayList<>();
 
@@ -1987,9 +2049,9 @@ public class GodController {
                 if (node == null) {
                     node = new PostTreeNode();
                 }
-                Iterator<PostDetails> iterator = posts.iterator();
+                final Iterator<PostDetails> iterator = posts.iterator();
                 while (iterator.hasNext()) {
-                    PostDetails details = iterator.next();
+                    final PostDetails details = iterator.next();
                     if (details.parent == null || (node.value != null && details.parent == node.value.id)) {
                         node.children.add(new PostTreeNode(details));
                         iterator.remove();
@@ -2002,7 +2064,7 @@ public class GodController {
             }
 
             private static List<PostDetails> list(PostTreeNode node, boolean desc) {
-                List<PostDetails> list = new ArrayList<>();
+                final List<PostDetails> list = new ArrayList<>();
                 if (node.value != null) {
                     list.add(node.value);
                     if (desc) {
@@ -2023,6 +2085,7 @@ public class GodController {
         private String user;
         private String name;
 
+        @SuppressWarnings("PublicConstructorInNonPublicClass")
         public UserUpdateRequest() {
         }
 
@@ -2056,6 +2119,7 @@ public class GodController {
         private int post;
         private String message;
 
+        @SuppressWarnings("PublicConstructorInNonPublicClass")
         public PostUpdateRequest() {
         }
 
@@ -2080,6 +2144,7 @@ public class GodController {
     private static final class PostID {
         private int post;
 
+        @SuppressWarnings("PublicConstructorInNonPublicClass")
         public PostID() {
         }
 
@@ -2097,6 +2162,7 @@ public class GodController {
         private int vote;
         private int post;
 
+        @SuppressWarnings("PublicConstructorInNonPublicClass")
         public PostVote() {
         }
 
@@ -2121,6 +2187,7 @@ public class GodController {
     private static final class ThreadID {
         private int thread;
 
+        @SuppressWarnings("PublicConstructorInNonPublicClass")
         public ThreadID() {
         }
 
@@ -2138,6 +2205,7 @@ public class GodController {
         private int vote;
         private int thread;
 
+        @SuppressWarnings("PublicConstructorInNonPublicClass")
         public ThreadVote() {
         }
 
@@ -2164,6 +2232,7 @@ public class GodController {
         private String slug;
         private int thread;
 
+        @SuppressWarnings("PublicConstructorInNonPublicClass")
         public ThreadUpdateRequest() {
         }
 
