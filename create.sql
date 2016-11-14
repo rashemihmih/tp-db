@@ -23,7 +23,7 @@ CREATE TABLE user_profile (
 CREATE TABLE forum (
   id         INT AUTO_INCREMENT NOT NULL PRIMARY KEY,
   name       VARCHAR(50) UNIQUE KEY,
-  short_name VARCHAR(50),
+  short_name VARCHAR(50)        NOT NULL,
   user_email VARCHAR(50)        NOT NULL,
   UNIQUE KEY (short_name),
   FOREIGN KEY (user_email) REFERENCES user_profile (email)
@@ -43,6 +43,7 @@ CREATE TABLE thread (
   dislikes      INT                NOT NULL DEFAULT 0,
   isClosed      BOOLEAN            NOT NULL DEFAULT FALSE,
   isDeleted     BOOLEAN            NOT NULL DEFAULT FALSE,
+  posts         INT                NOT NULL DEFAULT 0,
   FOREIGN KEY (forum) REFERENCES forum (short_name)
     ON DELETE CASCADE,
   FOREIGN KEY (user_email) REFERENCES user_profile (email)
@@ -56,7 +57,7 @@ CREATE TABLE post (
   id            INT AUTO_INCREMENT NOT NULL PRIMARY KEY,
   user_email    VARCHAR(50)        NOT NULL,
   message       TEXT               NOT NULL,
-  forum         VARCHAR(50),
+  forum         VARCHAR(50)        NOT NULL,
   thread_id     INT                NOT NULL,
   parent        INT                NULL     DEFAULT NULL,
   creation_time DATETIME           NOT NULL,

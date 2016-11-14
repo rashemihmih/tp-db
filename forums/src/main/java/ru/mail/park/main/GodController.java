@@ -152,12 +152,16 @@ public class GodController {
     }
 
     @SuppressWarnings({"OverlyComplexBooleanExpression", "MagicNumber"})
+    @Transactional
     @RequestMapping(path = "db/api/post/create", method = RequestMethod.POST)
     public ResponseEntity createPost(@RequestBody PostCreateRequest request) {
         if (StringUtils.isEmpty(request.date) || StringUtils.isEmpty(request.forum) ||
                 StringUtils.isEmpty(request.user) || StringUtils.isEmpty(request.message) ||
                 request.thread == null) {
             return ResponseEntity.ok(ResponseBody.invalid());
+        }
+        if (!request.isDeleted) {
+            jdbcTemplate.update("UPDATE thread SET posts = posts + 1 WHERE id = ?", request.thread);
         }
         final KeyHolder keyHolder = new GeneratedKeyHolder();
         try {
@@ -435,10 +439,9 @@ public class GodController {
             since = 0;
         }
         final String limitQuery = limit == null ? "" : " LIMIT " + limit;
-        final SqlRowSet set = jdbcTemplate.queryForRowSet("SELECT DISTINCT email, about, user_profile.id, " +
-                "isAnonymous, username, user_profile.name FROM user_profile JOIN post ON " +
-                "user_profile.email = post.user_email WHERE forum = ? AND user_profile.id >= ? " +
-                "ORDER BY user_profile.name " + order + limitQuery + ';', forum, since);
+        final SqlRowSet set = jdbcTemplate.queryForRowSet("SELECT * FROM user_profile WHERE email IN " +
+                "(SELECT DISTINCT user_email FROM post WHERE forum = ?) and id >= ? ORDER BY user_profile.name " +
+                order + limitQuery + ';', forum, since);
         final List<UserDetails> list = new ArrayList<>();
         while (set.next()) {
             final UserDetails details = new UserDetails();
@@ -500,7 +503,7 @@ public class GodController {
         }
         final String limitQuery = limit == null ? "" : " LIMIT " + limit;
         final SqlRowSet set = jdbcTemplate.queryForRowSet("SELECT creation_time, dislikes, id, isClosed, " +
-                "isDeleted, likes, message, slug, title, forum, user_email FROM thread WHERE forum = ? AND " +
+                "isDeleted, likes, message, slug, title, forum, user_email, posts FROM thread WHERE forum = ? AND " +
                 "creation_time >= ? ORDER BY creation_time " + order + limitQuery + ';', forum, since);
         final List<ThreadDetails> list = new ArrayList<>();
         while (set.next()) {
@@ -617,11 +620,11 @@ public class GodController {
         final SqlRowSet set;
         if (StringUtils.isEmpty(forum)) {
             set = jdbcTemplate.queryForRowSet("SELECT creation_time, dislikes, id, isClosed, isDeleted, likes, " +
-                    "message, slug, title, forum, user_email FROM thread WHERE user_email = ? AND " +
+                    "message, slug, title, forum, user_email, posts FROM thread WHERE user_email = ? AND " +
                     "creation_time >= ? ORDER BY creation_time " + order + limitQuery + ';', user, since);
         } else {
             set = jdbcTemplate.queryForRowSet("SELECT creation_time, dislikes, id, isClosed, isDeleted, likes, " +
-                    "message, slug, title, forum, user_email FROM thread WHERE forum = ? " +
+                    "message, slug, title, forum, user_email, posts FROM thread WHERE forum = ? " +
                     "AND creation_time >= ? ORDER BY creation_time " + order + limitQuery + ';', forum, since);
         }
         final List<ThreadDetails> list = new ArrayList<>();
@@ -649,12 +652,16 @@ public class GodController {
     @RequestMapping(path = "db/api/post/remove", method = RequestMethod.POST)
     public ResponseEntity deletePost(@RequestBody PostID request) {
         jdbcTemplate.update("UPDATE post SET isDeleted = TRUE WHERE id = ?;", request.post);
+        jdbcTemplate.update("UPDATE thread SET posts = posts - 1 WHERE id = (SELECT thread_id FROM post WHERE id = ?);",
+                request.post);
         return ResponseEntity.ok(ResponseBody.ok(request));
     }
 
     @RequestMapping(path = "db/api/post/restore", method = RequestMethod.POST)
     public ResponseEntity restorePost(@RequestBody PostID request) {
         jdbcTemplate.update("UPDATE post SET isDeleted = FALSE WHERE id = ?;", request.post);
+        jdbcTemplate.update("UPDATE thread SET posts = posts + 1 WHERE id = (SELECT thread_id FROM post WHERE id = ?);",
+                request.post);
         return ResponseEntity.ok(ResponseBody.ok(request));
     }
 
@@ -703,7 +710,7 @@ public class GodController {
     @Transactional
     @RequestMapping(path = "db/api/thread/remove", method = RequestMethod.POST)
     public ResponseEntity deleteThread(@RequestBody ThreadID request) {
-        jdbcTemplate.update("UPDATE thread SET isDeleted = TRUE WHERE id = ?;", request.thread);
+        jdbcTemplate.update("UPDATE thread SET isDeleted = TRUE, posts = 0 WHERE id = ?;", request.thread);
         jdbcTemplate.update("UPDATE post SET isDeleted = TRUE WHERE thread_id = ?;", request.thread);
         return ResponseEntity.ok(ResponseBody.ok(request));
     }
@@ -711,7 +718,8 @@ public class GodController {
     @Transactional
     @RequestMapping(path = "db/api/thread/restore", method = RequestMethod.POST)
     public ResponseEntity restoreThread(@RequestBody ThreadID request) {
-        jdbcTemplate.update("UPDATE thread SET isDeleted = FALSE WHERE id = ?;", request.thread);
+        jdbcTemplate.update("UPDATE thread SET isDeleted = FALSE, posts = (" +
+                "SELECT count(*) FROM post WHERE thread_id = ?) WHERE id = ?;", request.thread, request.thread);
         jdbcTemplate.update("UPDATE post SET isDeleted = FALSE WHERE thread_id = ?;", request.thread);
         return ResponseEntity.ok(ResponseBody.ok(request));
     }
@@ -1712,8 +1720,7 @@ public class GodController {
             likes = set.getInt("likes");
             message = set.getString("message");
             points = likes - dislikes;
-            posts = jdbcTemplate.queryForObject("SELECT count(*) FROM post WHERE thread_id = ? AND " +
-                    "isDeleted = FALSE;", Integer.class, id);
+            posts = set.getInt("posts");
             slug = set.getString("slug");
             title = set.getString("title");
             forum = set.getString("forum");
@@ -1729,8 +1736,7 @@ public class GodController {
             likes = set.getInt("likes");
             message = set.getString("message");
             points = likes - dislikes;
-            posts = jdbcTemplate.queryForObject("SELECT count(*) FROM post WHERE thread_id = ? AND " +
-                    "isDeleted = FALSE;", Integer.class, id);
+            posts = set.getInt("posts");
             slug = set.getString("slug");
             title = set.getString("title");
             processRelated(related, set);
