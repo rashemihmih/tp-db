@@ -47,7 +47,6 @@ CREATE TABLE thread (
     ON DELETE CASCADE,
   FOREIGN KEY (user_email) REFERENCES user_profile (email)
     ON DELETE CASCADE,
-  KEY (creation_time),
   KEY (user_email, creation_time),
   KEY (forum, creation_time)
 )
@@ -74,7 +73,6 @@ CREATE TABLE post (
     ON DELETE CASCADE,
   FOREIGN KEY (thread_id) REFERENCES thread (id)
     ON DELETE CASCADE,
-  KEY (creation_time),
   KEY (user_email, creation_time),
   KEY (thread_id, creation_time),
   KEY (forum, creation_time)
