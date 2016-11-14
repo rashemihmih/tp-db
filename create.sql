@@ -43,11 +43,13 @@ CREATE TABLE thread (
   dislikes      INT                NOT NULL DEFAULT 0,
   isClosed      BOOLEAN            NOT NULL DEFAULT FALSE,
   isDeleted     BOOLEAN            NOT NULL DEFAULT FALSE,
-  KEY (creation_time),
   FOREIGN KEY (forum) REFERENCES forum (short_name)
     ON DELETE CASCADE,
   FOREIGN KEY (user_email) REFERENCES user_profile (email)
-    ON DELETE CASCADE
+    ON DELETE CASCADE,
+  KEY (creation_time),
+  KEY (user_email, creation_time),
+  KEY (forum, creation_time)
 )
   DEFAULT CHARSET = utf8;
 
@@ -66,13 +68,16 @@ CREATE TABLE post (
   isEdited      BOOLEAN            NOT NULL DEFAULT FALSE,
   isSpam        BOOLEAN            NOT NULL DEFAULT FALSE,
   isDeleted     BOOLEAN            NOT NULL DEFAULT FALSE,
-  KEY (creation_time),
   FOREIGN KEY (user_email) REFERENCES user_profile (email)
     ON DELETE CASCADE,
   FOREIGN KEY (forum) REFERENCES forum (short_name)
     ON DELETE CASCADE,
   FOREIGN KEY (thread_id) REFERENCES thread (id)
-    ON DELETE CASCADE
+    ON DELETE CASCADE,
+  KEY (creation_time),
+  KEY (user_email, creation_time),
+  KEY (thread_id, creation_time),
+  KEY (forum, creation_time)
 )
   DEFAULT CHARSET = utf8;
 

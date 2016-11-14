@@ -62,7 +62,8 @@ public class GodController {
         try {
             jdbcTemplate.update(connection -> {
                 final PreparedStatement ps = connection.prepareStatement("INSERT INTO user_profile " +
-                        "(username, email, name, about, isAnonymous) VALUES (?, ?, ?, ?, ?);", Statement.RETURN_GENERATED_KEYS);
+                        "(username, email, name, about, isAnonymous) VALUES (?, ?, ?, ?, ?);",
+                        Statement.RETURN_GENERATED_KEYS);
                 ps.setString(1, request.username);
                 ps.setString(2, request.email);
                 ps.setString(3, request.name);
@@ -217,8 +218,8 @@ public class GodController {
         if (subscription.thread == null || StringUtils.isEmpty(subscription.user)) {
             return ResponseEntity.ok(ResponseBody.invalid());
         }
-        jdbcTemplate.update("DELETE FROM subscription WHERE thread_id = ? AND user_email = ?;", subscription.thread,
-                subscription.user);
+        jdbcTemplate.update("DELETE FROM subscription WHERE user_email = ? AND thread_id = ?;", subscription.user,
+                subscription.thread);
         return ResponseEntity.ok(ResponseBody.ok(subscription));
     }
 
@@ -405,15 +406,16 @@ public class GodController {
             return ResponseEntity.ok(ResponseBody.incorrect());
         }
         final String limitQuery = limit == null ? "" : " LIMIT " + limit;
-        final SqlRowSet set = jdbcTemplate.queryForRowSet("SELECT id FROM post WHERE user_email = ? AND " +
+        final SqlRowSet set = jdbcTemplate.queryForRowSet("SELECT * FROM post WHERE user_email = ? AND " +
                 "creation_time >= ? ORDER BY creation_time " + order + limitQuery + ';', user, since);
         final List<PostDetails> posts = new ArrayList<>();
         while (set.next()) {
-            posts.add(PostDetails.get(set.getInt("id"), null));
+            posts.add(new PostDetails(set));
         }
         return ResponseEntity.ok(ResponseBody.ok(posts.toArray()));
     }
 
+    @SuppressWarnings("OverlyComplexMethod")
     @Transactional
     @RequestMapping(path = "db/api/forum/listUsers", method = RequestMethod.GET)
     public ResponseEntity listForumUsers(@RequestParam(name = "forum") String forum,
@@ -433,13 +435,41 @@ public class GodController {
             since = 0;
         }
         final String limitQuery = limit == null ? "" : " LIMIT " + limit;
-        final SqlRowSet set = jdbcTemplate.queryForRowSet("SELECT DISTINCT email FROM user_profile JOIN post ON " +
-                "user_profile.email = post.user_email JOIN forum ON post.forum = forum.short_name WHERE " +
-                "short_name = ? AND user_profile.id >= ? ORDER BY user_profile.name " + order + limitQuery + ';',
-                forum, since);
+        final SqlRowSet set = jdbcTemplate.queryForRowSet("SELECT DISTINCT email, about, user_profile.id, " +
+                "isAnonymous, username, user_profile.name FROM user_profile JOIN post ON " +
+                "user_profile.email = post.user_email WHERE forum = ? AND user_profile.id >= ? " +
+                "ORDER BY user_profile.name " + order + limitQuery + ';', forum, since);
         final List<UserDetails> list = new ArrayList<>();
         while (set.next()) {
-            list.add(UserDetails.get(set.getString("email")));
+            final UserDetails details = new UserDetails();
+            details.about = set.getString("about");
+            details.email = set.getString("email");
+            details.id = set.getInt("id");
+            details.isAnonymous = set.getBoolean("isAnonymous");
+            details.username = set.getString("username");
+            details.name = set.getString("name");
+            final SqlRowSet followerSet = jdbcTemplate.queryForRowSet("SELECT follower FROM following WHERE " +
+                    "followee = ?;", details.email);
+            final List<String> followerList = new ArrayList<>();
+            while (followerSet.next()) {
+                followerList.add(followerSet.getString("follower"));
+            }
+            details.followers = followerList.toArray(new String[followerList.size()]);
+            final SqlRowSet followeeSet = jdbcTemplate.queryForRowSet("SELECT followee FROM following WHERE " +
+                    "follower = ?;", details.email);
+            final List<String> followeeList = new ArrayList<>();
+            while (followeeSet.next()) {
+                followeeList.add(followeeSet.getString("followee"));
+            }
+            details.following = followeeList.toArray(new String[followeeList.size()]);
+            final SqlRowSet subscriptionSet = jdbcTemplate.queryForRowSet("SELECT thread_id FROM subscription WHERE " +
+                    "user_email = ?;", details.email);
+            final List<Integer> subscriptionList = new ArrayList<>();
+            while (subscriptionSet.next()) {
+                subscriptionList.add(subscriptionSet.getInt("thread_id"));
+            }
+            details.subscriptions = subscriptionList.stream().mapToInt(i -> i).toArray();
+            list.add(details);
         }
         return ResponseEntity.ok(ResponseBody.ok(list.toArray()));
     }
@@ -469,12 +499,12 @@ public class GodController {
             return ResponseEntity.ok(ResponseBody.incorrect());
         }
         final String limitQuery = limit == null ? "" : " LIMIT " + limit;
-        final SqlRowSet set = jdbcTemplate.queryForRowSet("SELECT thread.id FROM thread JOIN forum " +
-                "ON thread.forum = forum.short_name WHERE short_name = ? AND " +
+        final SqlRowSet set = jdbcTemplate.queryForRowSet("SELECT creation_time, dislikes, id, isClosed, " +
+                "isDeleted, likes, message, slug, title, forum, user_email FROM thread WHERE forum = ? AND " +
                 "creation_time >= ? ORDER BY creation_time " + order + limitQuery + ';', forum, since);
         final List<ThreadDetails> list = new ArrayList<>();
         while (set.next()) {
-            list.add(ThreadDetails.get(set.getInt("id"), related));
+            list.add(new ThreadDetails(set, related));
         }
         return ResponseEntity.ok(ResponseBody.ok(list.toArray()));
     }
@@ -504,13 +534,13 @@ public class GodController {
             return ResponseEntity.ok(ResponseBody.incorrect());
         }
         final String limitQuery = limit == null ? "" : " LIMIT " + limit;
-        final SqlRowSet set = jdbcTemplate.queryForRowSet("SELECT post.id FROM post JOIN forum " +
-                "ON post.forum = forum.short_name WHERE short_name = ? AND " +
-                "creation_time >= ? ORDER BY creation_time " + order + limitQuery + ';',
-                forum, since);
+        final SqlRowSet set = jdbcTemplate.queryForRowSet("SELECT creation_time, dislikes, id, isApproved, " +
+                "isDeleted, isEdited, isHighlighted, isSpam, likes, message, parent, forum, thread_id, " +
+                "user_email FROM post WHERE forum = ? AND creation_time >= ? ORDER BY creation_time " + order +
+                limitQuery + ';', forum, since);
         final List<PostDetails> list = new ArrayList<>();
         while (set.next()) {
-            list.add(PostDetails.get(set.getInt("id"), related));
+            list.add(new PostDetails(set, related));
         }
         return ResponseEntity.ok(ResponseBody.ok(list.toArray()));
     }
@@ -542,21 +572,21 @@ public class GodController {
         final String limitQuery = limit == null ? "" : " LIMIT " + limit;
         final SqlRowSet set;
         if (StringUtils.isEmpty(forum)) {
-            set = jdbcTemplate.queryForRowSet("SELECT post.id FROM post JOIN thread " +
-                    "ON post.thread_id = thread.id WHERE thread_id = ? AND " +
-                    "post.creation_time >= ? ORDER BY post.creation_time " + order +
-                    limitQuery + ';', thread, since);
+            set = jdbcTemplate.queryForRowSet("SELECT creation_time, dislikes, id, isApproved, " +
+                    "isDeleted, isEdited, isHighlighted, isSpam, likes, message, parent, forum, " +
+                    "thread_id, user_email FROM post WHERE thread_id = ? AND creation_time >= ? " +
+                    "ORDER BY creation_time " + order + limitQuery + ';', thread, since);
         } else {
-            set = jdbcTemplate.queryForRowSet("SELECT post.id FROM post JOIN forum " +
-                    "ON post.forum = forum.short_name WHERE short_name = ? AND " +
-                    "creation_time >= ? ORDER BY creation_time " + order + limitQuery + ';',
-                    forum, since);
+            set = jdbcTemplate.queryForRowSet("SELECT creation_time, dislikes, id, isApproved, isDeleted, " +
+                    "isEdited, isHighlighted, isSpam, likes, message, parent, forum, thread_id, user_email " +
+                    "FROM post WHERE forum = ? AND creation_time >= ? ORDER BY creation_time " + order + limitQuery +
+                    ';', forum, since);
         }
-        final List<PostDetails> list = new ArrayList<>();
+        final List<PostDetails> posts = new ArrayList<>();
         while (set.next()) {
-            list.add(PostDetails.get(set.getInt("id"), null));
+            posts.add(new PostDetails(set));
         }
-        return ResponseEntity.ok(ResponseBody.ok(list.toArray()));
+        return ResponseEntity.ok(ResponseBody.ok(posts.toArray()));
     }
 
     @SuppressWarnings("OverlyComplexMethod")
@@ -586,19 +616,17 @@ public class GodController {
         final String limitQuery = limit == null ? "" : " LIMIT " + limit;
         final SqlRowSet set;
         if (StringUtils.isEmpty(forum)) {
-            set = jdbcTemplate.queryForRowSet("SELECT thread.id FROM thread JOIN user_profile " +
-                    "ON thread.user_email = user_profile.email WHERE email = ? AND " +
-                    "creation_time >= ? ORDER BY thread.creation_time " + order +
-                    limitQuery + ';', user, since);
+            set = jdbcTemplate.queryForRowSet("SELECT creation_time, dislikes, id, isClosed, isDeleted, likes, " +
+                    "message, slug, title, forum, user_email FROM thread WHERE user_email = ? AND " +
+                    "creation_time >= ? ORDER BY creation_time " + order + limitQuery + ';', user, since);
         } else {
-            set = jdbcTemplate.queryForRowSet("SELECT thread.id FROM thread JOIN forum " +
-                    "ON thread.forum = forum.short_name WHERE short_name = ? AND " +
-                    "creation_time >= ? ORDER BY creation_time " + order + limitQuery + ';',
-                    forum, since);
+            set = jdbcTemplate.queryForRowSet("SELECT creation_time, dislikes, id, isClosed, isDeleted, likes, " +
+                    "message, slug, title, forum, user_email FROM thread WHERE forum = ? " +
+                    "AND creation_time >= ? ORDER BY creation_time " + order + limitQuery + ';', forum, since);
         }
         final List<ThreadDetails> list = new ArrayList<>();
         while (set.next()) {
-            list.add(ThreadDetails.get(set.getInt("id"), null));
+            list.add(new ThreadDetails(set));
         }
         return ResponseEntity.ok(ResponseBody.ok(list.toArray()));
     }
@@ -730,12 +758,13 @@ public class GodController {
         if (since == null) {
             return ResponseEntity.ok(ResponseBody.incorrect());
         }
-        final SqlRowSet set = jdbcTemplate.queryForRowSet("SELECT post.id FROM post JOIN thread " +
-                    "ON post.thread_id = thread.id WHERE thread_id = ? AND " +
-                "post.creation_time >= ? ORDER BY post.creation_time " + order + ';', thread, since);
+        final SqlRowSet set = jdbcTemplate.queryForRowSet("SELECT creation_time, dislikes, id, isApproved, " +
+                "isDeleted, isEdited, isHighlighted, isSpam, likes, message, parent, forum, thread_id, user_email " +
+                "FROM post WHERE thread_id = ? AND creation_time >= ? ORDER BY creation_time " + order + ';',
+                thread, since);
         final List<PostDetails> list = new ArrayList<>();
         while (set.next()) {
-            list.add(PostDetails.get(set.getInt("id"), null));
+            list.add(new PostDetails(set));
         }
         return ResponseEntity.ok(ResponseBody.ok(PostDetails.sortPosts(list, sort, limit,
                 "desc".equalsIgnoreCase(order)).toArray()));
@@ -1674,6 +1703,39 @@ public class GodController {
         public ThreadDetails() {
         }
 
+        private ThreadDetails(SqlRowSet set) {
+            date = Utils.DATE_FORMAT.format(set.getTimestamp("creation_time"));
+            dislikes = set.getInt("dislikes");
+            id = set.getInt("id");
+            isClosed = set.getBoolean("isClosed");
+            isDeleted = set.getBoolean("isDeleted");
+            likes = set.getInt("likes");
+            message = set.getString("message");
+            points = likes - dislikes;
+            posts = jdbcTemplate.queryForObject("SELECT count(*) FROM post WHERE thread_id = ? AND " +
+                    "isDeleted = FALSE;", Integer.class, id);
+            slug = set.getString("slug");
+            title = set.getString("title");
+            forum = set.getString("forum");
+            user = set.getString("user_email");
+        }
+
+        private ThreadDetails(SqlRowSet set, String[] related) {
+            date = Utils.DATE_FORMAT.format(set.getTimestamp("creation_time"));
+            dislikes = set.getInt("dislikes");
+            id = set.getInt("id");
+            isClosed = set.getBoolean("isClosed");
+            isDeleted = set.getBoolean("isDeleted");
+            likes = set.getInt("likes");
+            message = set.getString("message");
+            points = likes - dislikes;
+            posts = jdbcTemplate.queryForObject("SELECT count(*) FROM post WHERE thread_id = ? AND " +
+                    "isDeleted = FALSE;", Integer.class, id);
+            slug = set.getString("slug");
+            title = set.getString("title");
+            processRelated(related, set);
+        }
+
         public String getDate() {
             return date;
         }
@@ -1784,36 +1846,26 @@ public class GodController {
             if (!thread.next()) {
                 return null;
             }
-            final ThreadDetails details = new ThreadDetails();
-            details.date = Utils.DATE_FORMAT.format(thread.getTimestamp("creation_time"));
-            details.dislikes = thread.getInt("dislikes");
-            details.id = thread.getInt("id");
-            details.isClosed = thread.getBoolean("isClosed");
-            details.isDeleted = thread.getBoolean("isDeleted");
-            details.likes = thread.getInt("likes");
-            details.message = thread.getString("message");
-            details.points = details.likes - details.dislikes;
-            details.posts = jdbcTemplate.queryForObject("SELECT count(*) FROM post WHERE thread_id = ? AND " +
-                    "isDeleted = FALSE;", Integer.class, id);
-            details.slug = thread.getString("slug");
-            details.title = thread.getString("title");
+            return new ThreadDetails(thread, related);
+        }
+
+        private void processRelated(String[] related, SqlRowSet set) {
             if (related != null) {
                 final List relatedList = Arrays.asList(related);
                 if (relatedList.contains("forum")) {
-                    details.forum = ForumDetails.get(thread.getString("forum"), null);
+                    forum = ForumDetails.get(set.getString("forum"), null);
                 } else {
-                    details.forum = thread.getString("forum");
+                    forum = set.getString("forum");
                 }
                 if (relatedList.contains("user")) {
-                    details.user = UserDetails.get(thread.getString("user_email"));
+                    user = UserDetails.get(set.getString("user_email"));
                 } else {
-                    details.user = thread.getString("user_email");
+                    user = set.getString("user_email");
                 }
             } else {
-                details.forum = thread.getString("forum");
-                details.user = thread.getString("user_email");
+                forum = set.getString("forum");
+                user = set.getString("user_email");
             }
-            return details;
         }
     }
 
@@ -1837,6 +1889,41 @@ public class GodController {
 
         @SuppressWarnings("PublicConstructorInNonPublicClass")
         public PostDetails() {
+        }
+
+        private PostDetails(SqlRowSet set) {
+            date = Utils.DATE_FORMAT.format(set.getTimestamp("creation_time"));
+            dislikes = set.getInt("dislikes");
+            id = set.getInt("id");
+            isApproved = set.getBoolean("isApproved");
+            isDeleted = set.getBoolean("isDeleted");
+            isEdited = set.getBoolean("isEdited");
+            isHighlighted = set.getBoolean("isHighlighted");
+            isSpam = set.getBoolean("isSpam");
+            likes = set.getInt("likes");
+            message = set.getString("message");
+            parent = (Integer) set.getObject("parent");
+            points = likes - dislikes;
+            forum = set.getString("forum");
+            thread = set.getInt("thread_id");
+            user = set.getString("user_email");
+        }
+
+        private PostDetails(SqlRowSet set, String[] related) {
+            date = Utils.DATE_FORMAT.format(set.getTimestamp("creation_time"));
+            dislikes = set.getInt("dislikes");
+            id = set.getInt("id");
+            isApproved = set.getBoolean("isApproved");
+            isDeleted = set.getBoolean("isDeleted");
+            isEdited = set.getBoolean("isEdited");
+            isHighlighted = set.getBoolean("isHighlighted");
+            isSpam = set.getBoolean("isSpam");
+            likes = set.getInt("likes");
+            message = set.getString("message");
+            parent = (Integer) set.getObject("parent");
+            points = likes - dislikes;
+            forum = set.getString("forum");
+            processRelated(related, set);
         }
 
         public String getDate() {
@@ -1965,42 +2052,32 @@ public class GodController {
             if (!post.next()) {
                 return null;
             }
-            final PostDetails details = new PostDetails();
-            details.date = Utils.DATE_FORMAT.format(post.getTimestamp("creation_time"));
-            details.dislikes = post.getInt("dislikes");
-            details.id = post.getInt("id");
-            details.isApproved = post.getBoolean("isApproved");
-            details.isDeleted = post.getBoolean("isDeleted");
-            details.isEdited = post.getBoolean("isEdited");
-            details.isHighlighted = post.getBoolean("isHighlighted");
-            details.isSpam = post.getBoolean("isSpam");
-            details.likes = post.getInt("likes");
-            details.message = post.getString("message");
-            details.parent = (Integer) post.getObject("parent");
-            details.points = details.likes - details.dislikes;
+            return new PostDetails(post, related);
+        }
+
+        private void processRelated(String[] related, SqlRowSet post) {
             if (related != null) {
                 final List relatedList = Arrays.asList(related);
                 if (relatedList.contains("forum")) {
-                    details.forum = ForumDetails.get(post.getString("forum"), null);
+                    forum = ForumDetails.get(post.getString("forum"), null);
                 } else {
-                    details.forum = post.getString("forum");
+                    forum = post.getString("forum");
                 }
                 if (relatedList.contains("thread")) {
-                    details.thread = ThreadDetails.get(post.getInt("thread_id"), null);
+                    thread = ThreadDetails.get(post.getInt("thread_id"), null);
                 } else {
-                    details.thread = post.getInt("thread_id");
+                    thread = post.getInt("thread_id");
                 }
                 if (relatedList.contains("user")) {
-                    details.user = UserDetails.get(post.getString("user_email"));
+                    user = UserDetails.get(post.getString("user_email"));
                 } else {
-                    details.user = post.getString("user_email");
+                    user = post.getString("user_email");
                 }
             } else {
-                details.forum = post.getString("forum");
-                details.thread = post.getInt("thread_id");
-                details.user = post.getString("user_email");
+                forum = post.getString("forum");
+                thread = post.getInt("thread_id");
+                user = post.getString("user_email");
             }
-            return details;
         }
 
         @SuppressWarnings("OverlyComplexMethod")
