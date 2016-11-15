@@ -426,7 +426,9 @@ public class GodController {
                                          @RequestParam(name = "limit", required = false) Integer limit,
                                          @RequestParam(name = "order", required = false) String order,
                                          @RequestParam(name = "since_id", required = false) Integer since) {
-        if (StringUtils.isEmpty(forum) || (limit != null && limit < 0)) {
+        final boolean isSinceNotNull = since != null;
+        final boolean isLimitNotNull = limit != null;
+        if (StringUtils.isEmpty(forum) || (isLimitNotNull && limit < 0)) {
             return ResponseEntity.ok(ResponseBody.incorrect());
         }
         if (StringUtils.isEmpty(order)) {
@@ -435,13 +437,26 @@ public class GodController {
         if (!"desc".equalsIgnoreCase(order) && !"asc".equalsIgnoreCase(order)) {
             return ResponseEntity.ok(ResponseBody.incorrect());
         }
-        if (since == null) {
-            since = 0;
+        String query = "SELECT * FROM user_profile WHERE email IN (SELECT DISTINCT user_email FROM post WHERE " +
+                "forum = ?) ";
+        if (isSinceNotNull) {
+            query += "AND id >= ? ";
         }
-        final String limitQuery = limit == null ? "" : " LIMIT " + limit;
-        final SqlRowSet set = jdbcTemplate.queryForRowSet("SELECT * FROM user_profile WHERE email IN " +
-                "(SELECT DISTINCT user_email FROM post WHERE forum = ?) and id >= ? ORDER BY user_profile.name " +
-                order + limitQuery + ';', forum, since);
+        query += "ORDER BY name " + order;
+        if (isLimitNotNull) {
+            query += " LIMIT ?";
+        }
+        query += ';';
+        final SqlRowSet set;
+        if (isSinceNotNull && isLimitNotNull) {
+            set = jdbcTemplate.queryForRowSet(query, forum, since, limit);
+        } else if (isLimitNotNull) {
+            set = jdbcTemplate.queryForRowSet(query, forum, limit);
+        } else if (isSinceNotNull) {
+            set = jdbcTemplate.queryForRowSet(query, forum, since);
+        } else {
+            set = jdbcTemplate.queryForRowSet(query, forum);
+        }
         final List<UserDetails> list = new ArrayList<>();
         while (set.next()) {
             final UserDetails details = new UserDetails();
