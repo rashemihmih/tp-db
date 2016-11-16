@@ -338,22 +338,26 @@ public class GodController {
                                         @RequestParam(name = "limit", required = false) Integer limit,
                                         @RequestParam(name = "order", required = false) String order,
                                         @RequestParam(name = "since_id", required = false) Integer since) {
-        if (StringUtils.isEmpty(user) || (limit != null && limit < 0)) {
+        if (StringUtils.isEmpty(user)) {
             return ResponseEntity.ok(ResponseBody.incorrect());
         }
         if (StringUtils.isEmpty(order)) {
             order = "desc";
         }
-        if (since == null) {
-            since = 0;
-        }
         if (!"desc".equalsIgnoreCase(order) && !"asc".equalsIgnoreCase(order)) {
             return ResponseEntity.ok(ResponseBody.incorrect());
         }
-        final String limitQuery = limit == null ? "" : " LIMIT " + limit;
-        final SqlRowSet set = jdbcTemplate.queryForRowSet("SELECT follower FROM following JOIN user_profile ON " +
-                "following.follower = user_profile.email WHERE followee = ? AND id >= ? ORDER BY name " + order +
-                limitQuery + ';', user, since);
+        String query = "SELECT follower FROM following JOIN user_profile ON following.follower = user_profile.email " +
+                "WHERE followee = ? ";
+        if (since != null) {
+            query += "AND id >= ? ";
+        }
+        query += "ORDER BY name " + order;
+        if (limit != null) {
+            query += " LIMIT ?";
+        }
+        query += ';';
+        final SqlRowSet set = listQuery(query, user, limit, since);
         final List<UserDetails> followers = new ArrayList<>();
         while (set.next()) {
             followers.add(UserDetails.get(set.getString("follower")));
@@ -367,22 +371,26 @@ public class GodController {
                                         @RequestParam(name = "limit", required = false) Integer limit,
                                         @RequestParam(name = "order", required = false) String order,
                                         @RequestParam(name = "since_id", required = false) Integer since) {
-        if (StringUtils.isEmpty(user) || (limit != null && limit < 0)) {
+        if (StringUtils.isEmpty(user)) {
             return ResponseEntity.ok(ResponseBody.incorrect());
         }
         if (StringUtils.isEmpty(order)) {
             order = "desc";
         }
-        if (since == null) {
-            since = 0;
-        }
         if (!"desc".equalsIgnoreCase(order) && !"asc".equalsIgnoreCase(order)) {
             return ResponseEntity.ok(ResponseBody.incorrect());
         }
-        final String limitQuery = limit == null ? "" : " LIMIT " + limit;
-        final SqlRowSet set = jdbcTemplate.queryForRowSet("SELECT followee FROM following JOIN user_profile ON " +
-                "following.followee = user_profile.email WHERE follower = ? AND id >= ? ORDER BY name " + order +
-                limitQuery + ';', user, since);
+        String query = "SELECT followee FROM following JOIN user_profile ON following.followee = user_profile.email " +
+                "WHERE follower = ?";
+        if (since != null) {
+            query += "AND id >= ? ";
+        }
+        query += "ORDER BY name " + order;
+        if (limit != null) {
+            query += " LIMIT ?";
+        }
+        query += ';';
+        final SqlRowSet set = listQuery(query, user, limit, since);
         final List<UserDetails> followees = new ArrayList<>();
         while (set.next()) {
             followees.add(UserDetails.get(set.getString("followee")));
@@ -390,13 +398,14 @@ public class GodController {
         return ResponseEntity.ok(ResponseBody.ok(followees.toArray()));
     }
 
+    @SuppressWarnings("OverlyComplexMethod")
     @Transactional
     @RequestMapping(path = "db/api/user/listPosts", method = RequestMethod.GET)
     public ResponseEntity listUserPosts(@RequestParam(name = "user") String user,
                                         @RequestParam(name = "limit", required = false) Integer limit,
                                         @RequestParam(name = "order", required = false) String order,
                                         @RequestParam(name = "since", required = false) String since) {
-        if (StringUtils.isEmpty(user) || (limit != null && limit < 0)) {
+        if (StringUtils.isEmpty(user)) {
             return ResponseEntity.ok(ResponseBody.incorrect());
         }
         if (StringUtils.isEmpty(order)) {
@@ -405,13 +414,16 @@ public class GodController {
         if (!"desc".equalsIgnoreCase(order) && !"asc".equalsIgnoreCase(order)) {
             return ResponseEntity.ok(ResponseBody.incorrect());
         }
-        since = Utils.validSince(since);
-        if (since == null) {
-            return ResponseEntity.ok(ResponseBody.incorrect());
+        String query = "SELECT * FROM post WHERE user_email = ? ";
+        if (since != null) {
+            query += "AND creation_time >= ? ";
         }
-        final String limitQuery = limit == null ? "" : " LIMIT " + limit;
-        final SqlRowSet set = jdbcTemplate.queryForRowSet("SELECT * FROM post WHERE user_email = ? AND " +
-                "creation_time >= ? ORDER BY creation_time " + order + limitQuery + ';', user, since);
+        query += "ORDER BY creation_time " + order;
+        if (limit != null) {
+            query += " LIMIT ?";
+        }
+        query += ';';
+        final SqlRowSet set = listQuery(query, user, limit, since);
         final List<PostDetails> posts = new ArrayList<>();
         while (set.next()) {
             posts.add(new PostDetails(set));
@@ -426,9 +438,7 @@ public class GodController {
                                          @RequestParam(name = "limit", required = false) Integer limit,
                                          @RequestParam(name = "order", required = false) String order,
                                          @RequestParam(name = "since_id", required = false) Integer since) {
-        final boolean isSinceNotNull = since != null;
-        final boolean isLimitNotNull = limit != null;
-        if (StringUtils.isEmpty(forum) || (isLimitNotNull && limit < 0)) {
+        if (StringUtils.isEmpty(forum)) {
             return ResponseEntity.ok(ResponseBody.incorrect());
         }
         if (StringUtils.isEmpty(order)) {
@@ -439,24 +449,15 @@ public class GodController {
         }
         String query = "SELECT * FROM user_profile WHERE email IN (SELECT DISTINCT user_email FROM post WHERE " +
                 "forum = ?) ";
-        if (isSinceNotNull) {
+        if (since != null) {
             query += "AND id >= ? ";
         }
         query += "ORDER BY name " + order;
-        if (isLimitNotNull) {
+        if (limit != null) {
             query += " LIMIT ?";
         }
         query += ';';
-        final SqlRowSet set;
-        if (isSinceNotNull && isLimitNotNull) {
-            set = jdbcTemplate.queryForRowSet(query, forum, since, limit);
-        } else if (isLimitNotNull) {
-            set = jdbcTemplate.queryForRowSet(query, forum, limit);
-        } else if (isSinceNotNull) {
-            set = jdbcTemplate.queryForRowSet(query, forum, since);
-        } else {
-            set = jdbcTemplate.queryForRowSet(query, forum);
-        }
+        final SqlRowSet set = listQuery(query, forum, limit, since);
         final List<UserDetails> list = new ArrayList<>();
         while (set.next()) {
             final UserDetails details = new UserDetails();
@@ -500,7 +501,7 @@ public class GodController {
                                            @RequestParam(name = "order", required = false) String order,
                                            @RequestParam(name = "since", required = false) String since,
                                            @RequestParam(name = "related", required = false) String[] related) {
-        if (StringUtils.isEmpty(forum) || (limit != null && limit < 0)) {
+        if (StringUtils.isEmpty(forum)) {
             return ResponseEntity.ok(ResponseBody.incorrect());
         }
         if (!Utils.isArrayValid(related, "user", "forum")) {
@@ -512,14 +513,16 @@ public class GodController {
         if (!"desc".equalsIgnoreCase(order) && !"asc".equalsIgnoreCase(order)) {
             return ResponseEntity.ok(ResponseBody.incorrect());
         }
-        since = Utils.validSince(since);
-        if (since == null) {
-            return ResponseEntity.ok(ResponseBody.incorrect());
+        String query = "SELECT * FROM thread WHERE forum = ? ";
+        if (since != null) {
+            query += "AND creation_time >= ? ";
         }
-        final String limitQuery = limit == null ? "" : " LIMIT " + limit;
-        final SqlRowSet set = jdbcTemplate.queryForRowSet("SELECT creation_time, dislikes, id, isClosed, " +
-                "isDeleted, likes, message, slug, title, forum, user_email, posts FROM thread WHERE forum = ? AND " +
-                "creation_time >= ? ORDER BY creation_time " + order + limitQuery + ';', forum, since);
+        query += "ORDER BY creation_time " + order;
+        if (limit != null) {
+            query += " LIMIT ?";
+        }
+        query += ';';
+        final SqlRowSet set = listQuery(query, forum, limit, since);
         final List<ThreadDetails> list = new ArrayList<>();
         while (set.next()) {
             list.add(new ThreadDetails(set, related));
@@ -535,7 +538,7 @@ public class GodController {
                                          @RequestParam(name = "order", required = false) String order,
                                          @RequestParam(name = "since", required = false) String since,
                                          @RequestParam(name = "related", required = false) String[] related) {
-        if (StringUtils.isEmpty(forum) || (limit != null && limit < 0)) {
+        if (StringUtils.isEmpty(forum)) {
             return ResponseEntity.ok(ResponseBody.incorrect());
         }
         if (!Utils.isArrayValid(related, "user", "forum", "thread")) {
@@ -547,15 +550,16 @@ public class GodController {
         if (!"desc".equalsIgnoreCase(order) && !"asc".equalsIgnoreCase(order)) {
             return ResponseEntity.ok(ResponseBody.incorrect());
         }
-        since = Utils.validSince(since);
-        if (since == null) {
-            return ResponseEntity.ok(ResponseBody.incorrect());
+        String query = "SELECT * FROM post WHERE forum = ? ";
+        if (since != null) {
+            query += "AND creation_time >= ? ";
         }
-        final String limitQuery = limit == null ? "" : " LIMIT " + limit;
-        final SqlRowSet set = jdbcTemplate.queryForRowSet("SELECT creation_time, dislikes, id, isApproved, " +
-                "isDeleted, isEdited, isHighlighted, isSpam, likes, message, parent, forum, thread_id, " +
-                "user_email FROM post WHERE forum = ? AND creation_time >= ? ORDER BY creation_time " + order +
-                limitQuery + ';', forum, since);
+        query += "ORDER BY creation_time " + order;
+        if (limit != null) {
+            query += " LIMIT ?";
+        }
+        query += ';';
+        final SqlRowSet set = listQuery(query, forum, limit, since);
         final List<PostDetails> list = new ArrayList<>();
         while (set.next()) {
             list.add(new PostDetails(set, related));
@@ -574,31 +578,35 @@ public class GodController {
         if (StringUtils.isEmpty(forum) == (thread == null)) {
             return ResponseEntity.ok(ResponseBody.incorrect());
         }
-        if (limit != null && limit < 0) {
-            return ResponseEntity.ok(ResponseBody.incorrect());
-        }
         if (StringUtils.isEmpty(order)) {
             order = "desc";
         }
         if (!"desc".equalsIgnoreCase(order) && !"asc".equalsIgnoreCase(order)) {
             return ResponseEntity.ok(ResponseBody.incorrect());
         }
-        since = Utils.validSince(since);
-        if (since == null) {
-            return ResponseEntity.ok(ResponseBody.incorrect());
-        }
-        final String limitQuery = limit == null ? "" : " LIMIT " + limit;
         final SqlRowSet set;
         if (StringUtils.isEmpty(forum)) {
-            set = jdbcTemplate.queryForRowSet("SELECT creation_time, dislikes, id, isApproved, " +
-                    "isDeleted, isEdited, isHighlighted, isSpam, likes, message, parent, forum, " +
-                    "thread_id, user_email FROM post WHERE thread_id = ? AND creation_time >= ? " +
-                    "ORDER BY creation_time " + order + limitQuery + ';', thread, since);
+            String query = "SELECT * FROM post WHERE thread_id = ? ";
+            if (since != null) {
+                query += "AND creation_time >= ? ";
+            }
+            query += "ORDER BY creation_time " + order;
+            if (limit != null) {
+                query += " LIMIT ?";
+            }
+            query += ';';
+            set = listQuery(query, thread, limit, since);
         } else {
-            set = jdbcTemplate.queryForRowSet("SELECT creation_time, dislikes, id, isApproved, isDeleted, " +
-                    "isEdited, isHighlighted, isSpam, likes, message, parent, forum, thread_id, user_email " +
-                    "FROM post WHERE forum = ? AND creation_time >= ? ORDER BY creation_time " + order + limitQuery +
-                    ';', forum, since);
+            String query = "SELECT * FROM post WHERE forum = ? ";
+            if (since != null) {
+                query += "AND creation_time >= ? ";
+            }
+            query += "ORDER BY creation_time " + order;
+            if (limit != null) {
+                query += " LIMIT ?";
+            }
+            query += ';';
+            set = listQuery(query, forum, limit, since);
         }
         final List<PostDetails> posts = new ArrayList<>();
         while (set.next()) {
@@ -618,29 +626,35 @@ public class GodController {
         if (StringUtils.isEmpty(forum) == StringUtils.isEmpty(user)) {
             return ResponseEntity.ok(ResponseBody.incorrect());
         }
-        if (limit != null && limit < 0) {
-            return ResponseEntity.ok(ResponseBody.incorrect());
-        }
         if (StringUtils.isEmpty(order)) {
             order = "desc";
         }
         if (!"desc".equalsIgnoreCase(order) && !"asc".equalsIgnoreCase(order)) {
             return ResponseEntity.ok(ResponseBody.incorrect());
         }
-        since = Utils.validSince(since);
-        if (since == null) {
-            return ResponseEntity.ok(ResponseBody.incorrect());
-        }
-        final String limitQuery = limit == null ? "" : " LIMIT " + limit;
         final SqlRowSet set;
         if (StringUtils.isEmpty(forum)) {
-            set = jdbcTemplate.queryForRowSet("SELECT creation_time, dislikes, id, isClosed, isDeleted, likes, " +
-                    "message, slug, title, forum, user_email, posts FROM thread WHERE user_email = ? AND " +
-                    "creation_time >= ? ORDER BY creation_time " + order + limitQuery + ';', user, since);
+            String query = "SELECT * FROM thread WHERE user_email = ? ";
+            if (since != null) {
+                query += "AND creation_time >= ? ";
+            }
+            query += "ORDER BY creation_time " + order;
+            if (limit != null) {
+                query += " LIMIT ?";
+            }
+            query += ';';
+            set = listQuery(query, user, limit, since);
         } else {
-            set = jdbcTemplate.queryForRowSet("SELECT creation_time, dislikes, id, isClosed, isDeleted, likes, " +
-                    "message, slug, title, forum, user_email, posts FROM thread WHERE forum = ? " +
-                    "AND creation_time >= ? ORDER BY creation_time " + order + limitQuery + ';', forum, since);
+            String query = "SELECT * FROM thread WHERE forum = ? ";
+            if (since != null) {
+                query += "AND creation_time >= ? ";
+            }
+            query += "ORDER BY creation_time " + order;
+            if (limit != null) {
+                query += " LIMIT ?";
+            }
+            query += ';';
+            set = listQuery(query, forum, limit, since);
         }
         final List<ThreadDetails> list = new ArrayList<>();
         while (set.next()) {
@@ -762,13 +776,11 @@ public class GodController {
                                           @RequestParam(name = "sort", required = false) String sort,
                                           @RequestParam(name = "order", required = false) String order,
                                           @RequestParam(name = "since", required = false) String since) {
-        if (limit != null && limit < 0) {
-            return ResponseEntity.ok(ResponseBody.incorrect());
-        }
         if (StringUtils.isEmpty(sort)) {
             sort = "flat";
         }
-        if (!"flat".equalsIgnoreCase(sort) && !"tree".equalsIgnoreCase(sort) && !"parent_tree".equalsIgnoreCase(sort)) {
+        final boolean isSortFlat = "flat".equalsIgnoreCase(sort);
+        if (!isSortFlat && !"tree".equalsIgnoreCase(sort) && !"parent_tree".equalsIgnoreCase(sort)) {
             return ResponseEntity.ok(ResponseBody.incorrect());
         }
         if (StringUtils.isEmpty(order)) {
@@ -777,31 +789,62 @@ public class GodController {
         if (!"desc".equalsIgnoreCase(order) && !"asc".equalsIgnoreCase(order)) {
             return ResponseEntity.ok(ResponseBody.incorrect());
         }
-        since = Utils.validSince(since);
-        if (since == null) {
-            return ResponseEntity.ok(ResponseBody.incorrect());
+        String query = "SELECT * FROM post WHERE thread_id = ? ";
+        final boolean isSinceNotNull = since != null;
+        if (isSinceNotNull) {
+            query += "AND creation_time >= ? ";
         }
-        final SqlRowSet set = jdbcTemplate.queryForRowSet("SELECT creation_time, dislikes, id, isApproved, " +
-                "isDeleted, isEdited, isHighlighted, isSpam, likes, message, parent, forum, thread_id, user_email " +
-                "FROM post WHERE thread_id = ? AND creation_time >= ? ORDER BY creation_time " + order + ';',
-                thread, since);
+        query += "ORDER BY creation_time " + order;
+        final boolean isLimitUsed = limit != null && isSortFlat;
+        if (isLimitUsed) {
+            query += " LIMIT ?";
+        }
+        query += ';';
+        final SqlRowSet set;
+        if (!isSinceNotNull && !isLimitUsed) {
+            set = jdbcTemplate.queryForRowSet(query, thread);
+        } else if (isSinceNotNull && !isLimitUsed) {
+            set = jdbcTemplate.queryForRowSet(query, thread, since);
+        } else if (!isSinceNotNull) {
+            set = jdbcTemplate.queryForRowSet(query, thread, limit);
+        } else {
+            set = jdbcTemplate.queryForRowSet(query, thread, since, limit);
+        }
         final List<PostDetails> list = new ArrayList<>();
         while (set.next()) {
             list.add(new PostDetails(set));
+        }
+        if (isSortFlat) {
+            return ResponseEntity.ok(ResponseBody.ok(list.toArray()));
         }
         return ResponseEntity.ok(ResponseBody.ok(PostDetails.sortPosts(list, sort, limit,
                 "desc".equalsIgnoreCase(order)).toArray()));
     }
 
-    @SuppressWarnings("InstanceMethodNamingConvention")
     @ExceptionHandler({HttpMessageNotReadableException.class, MissingServletRequestParameterException.class})
-    public ResponseEntity handleHttpMessageNotReadableException() {
+    public ResponseEntity handleRequestException() {
         return ResponseEntity.ok(ResponseBody.invalid());
     }
 
     @ExceptionHandler(DataAccessException.class)
     public ResponseEntity handleDataAccessException() {
         return ResponseEntity.ok(ResponseBody.unknownError());
+    }
+
+    private SqlRowSet listQuery(String query, Object arguement, Object limit, Object since) {
+        final boolean isSinceNotNull = since != null;
+        final boolean isLimitNotNull = limit != null;
+        final SqlRowSet set;
+        if (isSinceNotNull && isLimitNotNull) {
+            set = jdbcTemplate.queryForRowSet(query, arguement, since, limit);
+        } else if (isLimitNotNull) {
+            set = jdbcTemplate.queryForRowSet(query, arguement, limit);
+        } else if (isSinceNotNull) {
+            set = jdbcTemplate.queryForRowSet(query, arguement, since);
+        } else {
+            set = jdbcTemplate.queryForRowSet(query, arguement);
+        }
+        return set;
     }
 
     @SuppressWarnings("unused")
@@ -2103,20 +2146,14 @@ public class GodController {
 
         @SuppressWarnings("OverlyComplexMethod")
         public static List<PostDetails> sortPosts(List<PostDetails> posts, String sort, Integer limit, boolean desc) {
-            if ("flat".equalsIgnoreCase(sort)) {
-                if (limit == null || limit >= posts.size()) {
-                    return posts;
-                }
-                return posts.subList(0, limit);
-            }
             final List<PostDetails> list = PostTreeNode.list(PostTreeNode.tree(null, posts), desc);
             if (limit == null || limit >= list.size()) {
                 return list;
             }
-            if (limit == 0) {
-                return new ArrayList<>();
+            if (limit <= 0) {
+                return Collections.emptyList();
             }
-            if ("tree".equals(sort)) {
+            if ("tree".equalsIgnoreCase(sort)) {
                 return list.subList(0, limit);
             }
             int rootCount = 0;
