@@ -24,40 +24,40 @@ CREATE TABLE forum (
   id         INT AUTO_INCREMENT NOT NULL PRIMARY KEY,
   name       VARCHAR(50) UNIQUE KEY,
   short_name VARCHAR(50)        NOT NULL,
-  user_email VARCHAR(50)        NOT NULL,
+  user_id    INT                NOT NULL,
   UNIQUE KEY (short_name),
-  FOREIGN KEY (user_email) REFERENCES user_profile (email)
+  FOREIGN KEY (user_id) REFERENCES user_profile (id)
     ON DELETE CASCADE
 )
   DEFAULT CHARSET = utf8;
 
 CREATE TABLE thread (
   id            INT AUTO_INCREMENT NOT NULL PRIMARY KEY,
-  forum         VARCHAR(50)        NOT NULL,
+  forum_id      INT                NOT NULL,
   title         VARCHAR(50)        NOT NULL,
   slug          VARCHAR(50)        NOT NULL,
   message       TEXT               NOT NULL,
-  user_email    VARCHAR(50)        NOT NULL,
+  user_id       INT                NOT NULL,
   creation_time DATETIME           NOT NULL,
   likes         INT                NOT NULL DEFAULT 0,
   dislikes      INT                NOT NULL DEFAULT 0,
   isClosed      BOOLEAN            NOT NULL DEFAULT FALSE,
   isDeleted     BOOLEAN            NOT NULL DEFAULT FALSE,
   posts         INT                NOT NULL DEFAULT 0,
-  FOREIGN KEY (forum) REFERENCES forum (short_name)
+  FOREIGN KEY (forum_id) REFERENCES forum (id)
     ON DELETE CASCADE,
-  FOREIGN KEY (user_email) REFERENCES user_profile (email)
+  FOREIGN KEY (user_id) REFERENCES user_profile (id)
     ON DELETE CASCADE,
-  KEY (user_email, creation_time),
-  KEY (forum, creation_time)
+  KEY (user_id, creation_time),
+  KEY (forum_id, creation_time)
 )
   DEFAULT CHARSET = utf8;
 
 CREATE TABLE post (
   id            INT AUTO_INCREMENT NOT NULL PRIMARY KEY,
-  user_email    VARCHAR(50)        NOT NULL,
+  user_id       INT                NOT NULL,
   message       TEXT               NOT NULL,
-  forum         VARCHAR(50)        NOT NULL,
+  forum_id      INT                NOT NULL,
   thread_id     INT                NOT NULL,
   parent        INT                NULL     DEFAULT NULL,
   creation_time DATETIME           NOT NULL,
@@ -68,34 +68,34 @@ CREATE TABLE post (
   isEdited      BOOLEAN            NOT NULL DEFAULT FALSE,
   isSpam        BOOLEAN            NOT NULL DEFAULT FALSE,
   isDeleted     BOOLEAN            NOT NULL DEFAULT FALSE,
-  FOREIGN KEY (user_email) REFERENCES user_profile (email)
+  FOREIGN KEY (user_id) REFERENCES user_profile (id)
     ON DELETE CASCADE,
-  FOREIGN KEY (forum) REFERENCES forum (short_name)
+  FOREIGN KEY (forum_id) REFERENCES forum (id)
     ON DELETE CASCADE,
   FOREIGN KEY (thread_id) REFERENCES thread (id)
     ON DELETE CASCADE,
-  KEY (user_email, creation_time),
+  KEY (user_id, creation_time),
   KEY (thread_id, creation_time),
-  KEY (forum, creation_time)
+  KEY (forum_id, creation_time)
 )
   DEFAULT CHARSET = utf8;
 
 CREATE TABLE following (
-  follower VARCHAR(50) NOT NULL,
-  followee VARCHAR(50) NOT NULL,
+  follower INT NOT NULL,
+  followee INT NOT NULL,
   UNIQUE KEY (follower, followee),
-  FOREIGN KEY (follower) REFERENCES user_profile (email)
+  FOREIGN KEY (follower) REFERENCES user_profile (id)
     ON DELETE CASCADE,
-  FOREIGN KEY (followee) REFERENCES user_profile (email)
+  FOREIGN KEY (followee) REFERENCES user_profile (id)
     ON DELETE CASCADE
 )
   DEFAULT CHARSET = utf8;
 
 CREATE TABLE subscription (
-  user_email VARCHAR(50) NOT NULL,
-  thread_id  INT         NOT NULL,
-  UNIQUE KEY (user_email, thread_id),
-  FOREIGN KEY (user_email) REFERENCES user_profile (email)
+  user_id   INT NOT NULL,
+  thread_id INT NOT NULL,
+  UNIQUE KEY (user_id, thread_id),
+  FOREIGN KEY (user_id) REFERENCES user_profile (id)
     ON DELETE CASCADE,
   FOREIGN KEY (thread_id) REFERENCES thread (id)
     ON DELETE CASCADE
