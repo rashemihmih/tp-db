@@ -97,22 +97,16 @@ public class GodController {
         if (id < 0) {
             return ResponseEntity.ok(ResponseBody.notFound());
         }
-        final KeyHolder keyHolder = new GeneratedKeyHolder();
         try {
-            jdbcTemplate.update(connection -> {
-                final PreparedStatement ps = connection.prepareStatement("INSERT INTO forum " +
-                        "(name, short_name, user_id) VALUES (?, ?, ?);", Statement.RETURN_GENERATED_KEYS);
-                ps.setString(1, request.name);
-                ps.setString(2, request.short_name);
-                ps.setInt(3, id);
-                return ps;
-            }, keyHolder);
+            jdbcTemplate.update("INSERT INTO forum (name, short_name, user_id) VALUES (?, ?, ?);",
+                    request.name, request.short_name, id);
         } catch (DuplicateKeyException ignore) {
         } catch (DataIntegrityViolationException e) {
             return ResponseEntity.ok(ResponseBody.incorrect());
         }
         final ForumDetails details = new ForumDetails();
-        details.id = keyHolder.getKey().intValue();
+        details.id = jdbcTemplate.queryForObject("SELECT id FROM forum WHERE short_name = ?;", Integer.class,
+                request.short_name);
         details.name = request.name;
         details.short_name = request.short_name;
         details.user = request.user;
