@@ -76,7 +76,8 @@ CREATE TABLE post (
     ON DELETE CASCADE,
   KEY (user_id, creation_time),
   KEY (thread_id, creation_time),
-  KEY (forum_id, creation_time)
+  KEY (forum_id, creation_time),
+  KEY (user_id, forum_id)
 )
   DEFAULT CHARSET = utf8;
 
