@@ -252,18 +252,14 @@ public class GodController {
         if (StringUtils.isEmpty(following.follower) || StringUtils.isEmpty(following.followee)) {
             return ResponseEntity.ok(ResponseBody.invalid());
         }
-        final int follower = UserDetails.getId(following.follower);
-        final int followee = UserDetails.getId(following.followee);
-        if (follower < 0 || followee < 0) {
-            return ResponseEntity.ok(ResponseBody.notFound());
-        }
         try {
-            jdbcTemplate.update("INSERT INTO following (follower, followee) VALUES (?, ?);", follower, followee);
+            jdbcTemplate.update("INSERT INTO following (follower, followee) VALUES (?, ?);", following.follower,
+                    following.followee);
         } catch (DuplicateKeyException ignore) {
         } catch (DataIntegrityViolationException e) {
             return ResponseEntity.ok(ResponseBody.incorrect());
         }
-        final UserDetails details = UserDetails.get(follower);
+        final UserDetails details = UserDetails.get(following.follower);
         if (details == null) {
             return ResponseEntity.ok(ResponseBody.notFound());
         }
@@ -276,13 +272,9 @@ public class GodController {
         if (StringUtils.isEmpty(following.follower) || StringUtils.isEmpty(following.followee)) {
             return ResponseEntity.ok(ResponseBody.invalid());
         }
-        final int follower = UserDetails.getId(following.follower);
-        final int followee = UserDetails.getId(following.followee);
-        if (follower < 0 || followee < 0) {
-            return ResponseEntity.ok(ResponseBody.notFound());
-        }
-        jdbcTemplate.update("DELETE FROM following WHERE follower = ? AND followee = ?;", follower, followee);
-        final UserDetails details = UserDetails.get(follower);
+        jdbcTemplate.update("DELETE FROM following WHERE follower = ? AND followee = ?;", following.follower,
+                following.followee);
+        final UserDetails details = UserDetails.get(following.follower);
         if (details == null) {
             return ResponseEntity.ok(ResponseBody.notFound());
         }
@@ -379,18 +371,21 @@ public class GodController {
         if (!"desc".equalsIgnoreCase(order) && !"asc".equalsIgnoreCase(order)) {
             return ResponseEntity.ok(ResponseBody.incorrect());
         }
-        final int followee = UserDetails.getId(user);
-        String query = "SELECT * FROM user_profile JOIN following ON user_profile.id = following.follower WHERE " +
-                "followee = ? ";
+        String query = "SELECT user_profile.*, group_concat(DISTINCT f1.follower) AS followers, " +
+                "group_concat(DISTINCT f2.followee) AS followees, group_concat(DISTINCT subscription.thread_id) " +
+                "AS subscriptions FROM user_profile JOIN following f ON user_profile.email = f.follower " +
+                "LEFT JOIN following f1 ON user_profile.email = f1.followee " +
+                "LEFT JOIN following f2 ON user_profile.email = f2.follower LEFT JOIN subscription ON " +
+                "user_profile.id = subscription.user_id WHERE f.followee = ? ";
         if (since != null) {
             query += "AND id >= ? ";
         }
-        query += "ORDER BY name " + order;
+        query += "GROUP BY user_profile.id ORDER BY name " + order;
         if (limit != null) {
             query += " LIMIT ?";
         }
         query += ';';
-        final SqlRowSet set = listQuery(query, followee, limit, since);
+        final SqlRowSet set = listQuery(query, user, limit, since);
         final List<UserDetails> followers = new ArrayList<>();
         while (set.next()) {
             followers.add(new UserDetails(set));
@@ -413,9 +408,12 @@ public class GodController {
         if (!"desc".equalsIgnoreCase(order) && !"asc".equalsIgnoreCase(order)) {
             return ResponseEntity.ok(ResponseBody.incorrect());
         }
-        final int follower = UserDetails.getId(user);
-        String query = "SELECT * FROM user_profile JOIN following ON user_profile.id = following.followee WHERE " +
-                "follower = ? ";
+        String query = "SELECT user_profile.*, group_concat(DISTINCT f1.follower) AS followers, " +
+                "group_concat(DISTINCT f2.followee) AS followees, group_concat(DISTINCT subscription.thread_id) " +
+                "AS subscriptions FROM user_profile JOIN following f ON user_profile.email = f.followee " +
+                "LEFT JOIN following f1 ON user_profile.email = f1.followee " +
+                "LEFT JOIN following f2 ON user_profile.email = f2.follower LEFT JOIN subscription ON " +
+                "user_profile.id = subscription.user_id WHERE f.follower = ? ";
         if (since != null) {
             query += "AND id >= ? ";
         }
@@ -424,10 +422,10 @@ public class GodController {
             query += " LIMIT ?";
         }
         query += ';';
-        final SqlRowSet set = listQuery(query, follower, limit, since);
+        final SqlRowSet set = listQuery(query, user, limit, since);
         final List<UserDetails> followees = new ArrayList<>();
         while (set.next()) {
-            followees.add(UserDetails.get(set.getInt("followee")));
+            followees.add(new UserDetails(set));
         }
         return ResponseEntity.ok(ResponseBody.ok(followees.toArray()));
     }
@@ -481,17 +479,22 @@ public class GodController {
         if (!"desc".equalsIgnoreCase(order) && !"asc".equalsIgnoreCase(order)) {
             return ResponseEntity.ok(ResponseBody.incorrect());
         }
-        String query = "SELECT * FROM user_profile WHERE id IN (SELECT DISTINCT user_id FROM post WHERE " +
-                "forum_id = ?) ";
+        String query = "SELECT user_profile.*, group_concat(DISTINCT f1.follower) AS followers, " +
+                "group_concat(DISTINCT f2.followee) AS followees, group_concat(DISTINCT subscription.thread_id) AS " +
+                "subscriptions FROM user_profile JOIN post ON user_profile.id = post.user_id LEFT JOIN following f1 " +
+                "ON user_profile.email = f1.followee LEFT JOIN following f2 ON user_profile.email = f1.follower " +
+                "LEFT JOIN subscription ON user_profile.id = subscription.user_id LEFT JOIN forum ON " +
+                "post.forum_id = forum.id WHERE short_name = ?";
         if (since != null) {
-            query += "AND id >= ? ";
+            query += "AND user_profile.id >= ? ";
         }
-        query += "ORDER BY name " + order;
+
+        query += "GROUP BY user_profile.id ORDER BY user_profile.name " + order;
         if (limit != null) {
             query += " LIMIT ?";
         }
         query += ';';
-        final SqlRowSet set = listQuery(query, ForumDetails.getId(forum), limit, since);
+        final SqlRowSet set = listQuery(query, forum, limit, since);
         final List<UserDetails> list = new ArrayList<>();
         while (set.next()) {
             final UserDetails details = new UserDetails();
@@ -501,27 +504,13 @@ public class GodController {
             details.isAnonymous = set.getBoolean("isAnonymous");
             details.username = set.getString("username");
             details.name = set.getString("name");
-            final SqlRowSet followerSet = jdbcTemplate.queryForRowSet("SELECT follower FROM following WHERE " +
-                    "followee = ?;", details.id);
-            final List<String> followerList = new ArrayList<>();
-            while (followerSet.next()) {
-                followerList.add(followerSet.getString("follower"));
-            }
-            details.followers = followerList.toArray(new String[followerList.size()]);
-            final SqlRowSet followeeSet = jdbcTemplate.queryForRowSet("SELECT followee FROM following WHERE " +
-                    "follower = ?;", details.id);
-            final List<String> followeeList = new ArrayList<>();
-            while (followeeSet.next()) {
-                followeeList.add(followeeSet.getString("followee"));
-            }
-            details.following = followeeList.toArray(new String[followeeList.size()]);
-            final SqlRowSet subscriptionSet = jdbcTemplate.queryForRowSet("SELECT thread_id FROM subscription WHERE " +
-                    "user_id = ?;", details.id);
-            final List<Integer> subscriptionList = new ArrayList<>();
-            while (subscriptionSet.next()) {
-                subscriptionList.add(subscriptionSet.getInt("thread_id"));
-            }
-            details.subscriptions = subscriptionList.stream().mapToInt(i -> i).toArray();
+            final String followers = set.getString("followers");
+            details.followers = followers != null ? followers.split(",") : new String[0];
+            final String followees = set.getString("followees");
+            details.following = followees != null ? followees.split(",") : new String[0];
+            final String subscriptions = set.getString("subscriptions");
+            details.subscriptions = subscriptions != null ? Arrays.stream(subscriptions.split(",")).
+                    mapToInt(Integer::parseInt).toArray() : new int[0];
             list.add(details);
         }
         return ResponseEntity.ok(ResponseBody.ok(list.toArray()));
@@ -1615,27 +1604,13 @@ public class GodController {
             isAnonymous = set.getBoolean("isAnonymous");
             username = set.getString("username");
             name = set.getString("name");
-            final SqlRowSet followerSet = jdbcTemplate.queryForRowSet("SELECT email FROM user_profile JOIN following " +
-                    "ON user_profile.id = following.follower WHERE followee = ?;", id);
-            final List<String> followerList = new ArrayList<>();
-            while (followerSet.next()) {
-                followerList.add(followerSet.getString("email"));
-            }
-            followers = followerList.toArray(new String[followerList.size()]);
-            final SqlRowSet followeeSet = jdbcTemplate.queryForRowSet("SELECT email FROM user_profile JOIN following " +
-                    "ON user_profile.id = following.followee WHERE follower = ?;", id);
-            final List<String> followeeList = new ArrayList<>();
-            while (followeeSet.next()) {
-                followeeList.add(followeeSet.getString("email"));
-            }
-            following = followeeList.toArray(new String[followeeList.size()]);
-            final SqlRowSet subscriptionSet = jdbcTemplate.queryForRowSet("SELECT thread_id FROM subscription WHERE " +
-                    "user_id = ?;", id);
-            final List<Integer> subscriptionList = new ArrayList<>();
-            while (subscriptionSet.next()) {
-                subscriptionList.add(subscriptionSet.getInt("thread_id"));
-            }
-            subscriptions = subscriptionList.stream().mapToInt(i -> i).toArray();
+            final String followersCat = set.getString("followers");
+            followers = followersCat != null ? followersCat.split(",") : new String[0];
+            final String followeesCat = set.getString("followees");
+            following = followeesCat != null ? followeesCat.split(",") : new String[0];
+            final String subscriptionsCat = set.getString("subscriptions");
+            subscriptions = subscriptionsCat != null ? Arrays.stream(subscriptionsCat.split(",")).
+                    mapToInt(Integer::parseInt).toArray() : new int[0];
         }
 
         public String getAbout() {
@@ -1712,7 +1687,13 @@ public class GodController {
 
         @SuppressWarnings("StaticMethodNamingConvention")
         public static UserDetails get(int id) {
-            final SqlRowSet user = jdbcTemplate.queryForRowSet("SELECT * FROM user_profile WHERE id = ?;", id);
+            final SqlRowSet user = jdbcTemplate.queryForRowSet("SELECT user_profile.*, " +
+                    "group_concat(DISTINCT f1.follower) AS followers, group_concat(DISTINCT f2.followee) " +
+                    "AS followees, group_concat(DISTINCT subscription.thread_id) AS subscriptions FROM user_profile " +
+                    "LEFT JOIN following f1 ON user_profile.email = f1.followee LEFT JOIN following f2 " +
+                    "ON user_profile.email = f2.follower LEFT JOIN subscription " +
+                    "ON user_profile.id = subscription.user_id WHERE user_profile.id = ? " +
+                    "GROUP BY user_profile.id;", id);
             if (!user.next()) {
                 return null;
             }
@@ -1721,7 +1702,13 @@ public class GodController {
 
         @SuppressWarnings("StaticMethodNamingConvention")
         public static UserDetails get(String email) {
-            final SqlRowSet user = jdbcTemplate.queryForRowSet("SELECT * FROM user_profile WHERE email = ?;", email);
+            final SqlRowSet user = jdbcTemplate.queryForRowSet("SELECT user_profile.*, " +
+                    "group_concat(DISTINCT f1.follower) AS followers, group_concat(DISTINCT f2.followee) " +
+                    "AS followees, group_concat(DISTINCT subscription.thread_id) AS subscriptions FROM user_profile " +
+                    "LEFT JOIN following f1 ON user_profile.email = f1.followee LEFT JOIN following f2 " +
+                    "ON user_profile.email = f2.follower LEFT JOIN subscription " +
+                    "ON user_profile.id = subscription.user_id WHERE user_profile.email = ? " +
+                    "GROUP BY user_profile.id;", email);
             if (!user.next()) {
                 return null;
             }
@@ -1795,7 +1782,7 @@ public class GodController {
         }
 
         @SuppressWarnings("StaticMethodNamingConvention")
-        public static ForumDetails get(int id, String[] related) {
+        public static ForumDetails get(int id) {
             final SqlRowSet forum = jdbcTemplate.queryForRowSet("SELECT * FROM forum WHERE id = ?;", id);
             if (!forum.next()) {
                 return null;
@@ -1805,11 +1792,7 @@ public class GodController {
             details.name = forum.getString("name");
             details.short_name = forum.getString("short_name");
             details.userId = forum.getInt("user_id");
-            if (related != null && Arrays.asList(related).contains("user")) {
-                details.user = UserDetails.get(details.userId);
-            } else {
-                details.user = UserDetails.getEmail(details.userId);
-            }
+            details.user = UserDetails.getEmail(details.userId);
             return details;
         }
 
@@ -2026,7 +2009,7 @@ public class GodController {
             if (related != null) {
                 final List relatedList = Arrays.asList(related);
                 if (relatedList.contains("forum")) {
-                    forum = ForumDetails.get(forumId, null);
+                    forum = ForumDetails.get(forumId);
                 } else {
                     forum = ForumDetails.getShortName(forumId);
                 }
@@ -2239,7 +2222,7 @@ public class GodController {
             if (related != null) {
                 final List relatedList = Arrays.asList(related);
                 if (relatedList.contains("forum")) {
-                    forum = ForumDetails.get(forumId, null);
+                    forum = ForumDetails.get(forumId);
                 } else {
                     forum = ForumDetails.getShortName(forumId);
                 }
