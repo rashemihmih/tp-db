@@ -82,12 +82,12 @@ CREATE TABLE post (
   DEFAULT CHARSET = utf8;
 
 CREATE TABLE following (
-  follower INT NOT NULL,
-  followee INT NOT NULL,
+  follower VARCHAR(50) NOT NULL,
+  followee VARCHAR(50) NOT NULL,
   UNIQUE KEY (follower, followee),
-  FOREIGN KEY (follower) REFERENCES user_profile (id)
+  FOREIGN KEY (follower) REFERENCES user_profile (email)
     ON DELETE CASCADE,
-  FOREIGN KEY (followee) REFERENCES user_profile (id)
+  FOREIGN KEY (followee) REFERENCES user_profile (email)
     ON DELETE CASCADE
 )
   DEFAULT CHARSET = utf8;
