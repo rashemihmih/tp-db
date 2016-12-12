@@ -49,11 +49,9 @@ public class GodController {
     @RequestMapping(path = "db/api/status", method = RequestMethod.GET)
     public ResponseEntity status() {
         final int user = jdbcTemplate.queryForObject("SELECT count(*) FROM user_profile;", Integer.class);
-        final int thread = jdbcTemplate.queryForObject("SELECT count(*) FROM thread WHERE isDeleted = FALSE;",
-                Integer.class);
+        final int thread = jdbcTemplate.queryForObject("SELECT count(*) FROM thread;", Integer.class);
         final int forum = jdbcTemplate.queryForObject("SELECT count(*) FROM forum;", Integer.class);
-        final int post = jdbcTemplate.queryForObject("SELECT count(*) FROM post WHERE isDeleted = FALSE;",
-                Integer.class);
+        final int post = jdbcTemplate.queryForObject("SELECT count(*) FROM post;", Integer.class);
         return ResponseEntity.ok(ResponseBody.ok(new StatusResponse(user, thread, forum, post)));
     }
 
