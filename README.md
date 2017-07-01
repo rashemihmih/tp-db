@@ -1,1 +1,1 @@
-# tp-db
+Forum API. Technopark databases course project.
